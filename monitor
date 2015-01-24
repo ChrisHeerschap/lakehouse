@@ -152,7 +152,7 @@ noise "Updating HTML file"
 cat << EOF > $out
 <HEAD>
 <meta http-equiv="refresh" content="300">
-<TITLE>Temperature</TITLE>
+<TITLE>Monitor</TITLE>
 </HEAD>
 <BODY>
 <TABLE CELLPADDING=10>

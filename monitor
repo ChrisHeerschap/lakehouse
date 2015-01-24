@@ -14,7 +14,9 @@ inifile="$HOME/.monitor.cfg"
 # Base dir
 dir='/home/cmh/www'
 # Set date vars
-eval $(/bin/date +"yr=%y mo=%m da=%d h24=%H h12=%l mi=%M pm=%p es=%s")
+eval $(/bin/date +"yr=%y mo=%m da=%d h24=%H h12=%I mi=%M pm=%p es=%s")
+# Drop the leading zero on the 12h hour value
+h12=${h12#0}
 # Storage directory
 stodir="$dir/storage/$yr/$mo/$da"
 # Output file for the webcam

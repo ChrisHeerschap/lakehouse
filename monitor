@@ -1,0 +1,175 @@
+#!/bin/bash
+
+# Debugging set if var "_DEBUG" is non-null
+if [[ -n $_DEBUG ]]
+then
+	echo "debug on"
+	exec 2> debug
+	set -x
+fi
+
+##### VAR DEFS #####
+# Use this file for var defs which override these defaults
+inifile="$HOME/.monitor.cfg"
+# Base dir
+dir='/home/cmh/www'
+# Set date vars
+eval $(/bin/date +"yr=%y mo=%m da=%d h24=%H h12=%l mi=%M pm=%p es=%s")
+# Storage directory
+stodir="$dir/storage/$yr/$mo/$da"
+# Output file for the webcam
+file="$stodir/$yr$mo$da-$h24$mi.jpg"
+# Filename for the most recent file
+now="$dir/now.jpg"
+# Times to start and stop taking photos
+photostart=6
+photostop=18
+# Swap out this image if the taken photo is too dark
+dark="$dir/images/toodark.jpg"
+# Swap out this image if we're outside of the camera's time range
+nophoto="$dir/images/nophoto.jpg"
+# IP of the weather station
+weather='192.168.113.11'
+# URL of the live data page on the weather station
+url="http://${weather}/livedata.htm"
+# Output to this HTML page
+out="$dir/now.html"
+# Track temps in this csv (rotate daily)
+csv="$dir/temp-$yr$mo$da.csv"
+# Low temperature - alert if inside temp is under this (deg F)
+lowtemp=45
+# Default to non-verbose output
+NOISE=0
+
+# Grab some vars from the ini file
+#  * overrides defaults from above
+if [[ -r $inifile ]]
+then
+	. $inifile
+else
+	echo "WARNING: ini file $inifile unreadable" >&2
+fi
+
+##### FUNCTIONS DEFS #####
+function noise {
+	(( NOISE )) && echo "$*"
+}
+
+# Check if we're running from an interactive session
+if tty -s
+then
+	# Can be overridden with "-q" option below
+	NOISE=1
+fi
+
+# Options processing
+while getopts ":qv" opt
+do
+	case $opt in
+		q)	# Run quietly
+			NOISE=0;;
+		v)	# Run verbosely
+			NOISE=1;;
+		*)	# Any other option triggers usage
+			echo "Usage: $0 [ -q | -v ]"
+			echo "	-q	Run quietly"
+			echo "	-n	Run verbosely"
+			echo
+			exit 1
+			;;
+	esac
+done
+shift $((OPTIND-1))
+
+# Start off in the web dir
+noise "Running in $dir"
+cd $dir
+
+# Make the storage dir
+mkdir -p $stodir
+
+# Take a photo with the onboard camera if the time is between 6am and 6pm
+if (( h24 > photostart && h24 < photostop ))
+then
+	noise "Taking photo with webcam"
+	noise "	   file:	$file"
+	noise "	current:	$now"
+	/usr/bin/raspistill -n -w 640 -h 480 -vf -hf -e jpg -awb fluorescent -x none -ev +1 -sa 0 -o $file -l $now
+
+	# Check to see if the image is too dark
+	noise "Checking photo exposure"
+	mean="$(identify -format '%[mean]' $now)"
+	# Drop the decimal (bash doesn't understand fp numbers)
+	mean="${mean%%.*}"
+
+	# 1000 seems to be a good level to qualify as "too dark".
+	if (( mean < 1000 ))
+	then
+		noise "Replacing photo with \"too dark\" message"
+		rm $now
+		ln -s $dark $now
+	fi
+else
+	# Outside the camera's runtime (aka night) - swap in the no photo image
+	noise "Skipping photo due to time"
+	if [[ ! $now -ef $nophoto ]]
+	then
+		rm $now
+		ln -s $nophoto $now
+	fi
+fi
+
+# Get the temps from the weather station
+#  * Grab the live data page
+#  * grep the lines for inside and outside temp and humidity
+#  * output them in the form "inTemp=64.2"
+#  * eval those lines to set the values in those variables
+noise "Getting temp/humidity info from weather station"
+eval $(curl -s $url | egrep "(in|out)(Temp|Humi)" | cut -f 4,14 -d'"' --output-delimiter='=')
+
+# Alert if it's too cold
+if (( ${inTemp%%.*} < lowtemp ))
+then
+	if [[ -n $alert ]]
+	then
+		# Send an alert on the low temp condition
+		noise "Alerting on low temp condition ($inTemp)"
+		echo "ALERT: Inside temp is $inTemp!" | mail -s "ALERT: Lakehouse temp" $alert
+	else
+		# alert address not set! Log some errors and hope they're seen
+		msg="WARNING: No alert address set and current temp: $inTemp"
+		logger -t MONITOR -p user.crit "$msg"
+		echo "$msg" >&2
+	fi
+fi
+
+# Log the values to the csv file
+noise "Updating data points to CSV file $csv"
+echo "$es,$inTemp,$inHumi,$outTemp,$outHumi" >> $csv
+
+# Write the HTML status file
+noise "Updating HTML file"
+cat << EOF > $out
+<HEAD>
+<meta http-equiv="refresh" content="300">
+<TITLE>Temperature</TITLE>
+</HEAD>
+<BODY>
+<TABLE CELLPADDING=10>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$inTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Temp last updated: $mo/$da/$yr $h12:$mi $pm</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2>Wunderground</A></TD></TR>
+</TD></TR></TABLE>
+</BODY>
+EOF
+
+
+##### END #####
+noise "	...completed successfully!"
+exit 0

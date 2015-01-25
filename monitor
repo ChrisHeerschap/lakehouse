@@ -19,6 +19,8 @@ eval $(/bin/date +"yr=%y mo=%m da=%d h24=%H h12=%I mi=%M pm=%p es=%s")
 h12=${h12#0}
 # Storage directory
 stodir="$dir/storage/$yr/$mo/$da"
+# RRD dir
+rrddir="$dir/../rrd"
 # Output file for the webcam
 file="$stodir/$yr$mo$da-$h24$mi.jpg"
 # Filename for the most recent file
@@ -37,7 +39,7 @@ url="http://${weather}/livedata.htm"
 # Output to this HTML page
 out="$dir/now.html"
 # Track temps in this csv (rotate daily)
-csv="$dir/temp-$yr$mo$da.csv"
+csv="$stodir/temp-$yr$mo$da.csv"
 # Low temperature - alert if inside temp is under this (deg F)
 lowtemp=45
 # Default to non-verbose output
@@ -149,6 +151,17 @@ fi
 noise "Updating data points to CSV file $csv"
 echo "$es,$inTemp,$inHumi,$outTemp,$outHumi" >> $csv
 
+# Update the RRD files and graphs
+for rrd in inTemp outTemp
+do
+	noise "Updating the RRD graph $rrd"
+	# Update the RRD file
+	/usr/bin/rrdtool update $rrddir/${rrd}.rrd $es:$(eval echo \$$rrd)
+	# Regenerate the graphs
+	/usr/bin/rrdtool graph $dir/${rrd}.png DEF:temp=$rrddir/${rrd}.rrd:${rrd}:AVERAGE LINE2:temp#00FF00 > /dev/null
+done
+
+
 # Write the HTML status file
 noise "Updating HTML file"
 cat << EOF > $out
@@ -165,6 +178,8 @@ cat << EOF > $out
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outTemp.png></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Temp last updated: $mo/$da/$yr $h12:$mi $pm</TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2>Wunderground</A></TD></TR>
 </TD></TR></TABLE>

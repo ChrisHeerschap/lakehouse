@@ -151,8 +151,17 @@ fi
 noise "Updating data points to CSV file $csv"
 echo "$es,$inTemp,$inHumi,$outTemp,$outHumi" >> $csv
 
+# Get the CPU temp
+cpuTemp=$(< /sys/class/thermal/thermal_zone0/temp)
+# convert to fahrenheit (preserving the x1000 scale to fake FP math)
+cpuTemp=$((cpuTemp*9/5+32000))
+# convert to decimal
+cpuTemp="${cpuTemp:0:-3}.${cpuTemp:0-3}"
+# Log it to syslog
+logger -t cpuTemp -p user.info "got cpu temp $cpuTemp at timestamp $es"
+
 # Update the RRD files and graphs
-for rrd in inTemp outTemp
+for rrd in inTemp outTemp cpuTemp
 do
 	noise "Updating the RRD graph $rrd"
 	# Update the RRD file

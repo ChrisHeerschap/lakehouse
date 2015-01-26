@@ -93,7 +93,10 @@ cd $dir
 mkdir -p $stodir
 
 # Take a photo with the onboard camera if the time is between 6am and 6pm
-if (( h24 > photostart && h24 < photostop ))
+#  NB: have to specify values as base 10 with "10#" prefix to avoid 08/09 being 
+#      interpreted as bad octal values. Bash will interpret a number with a leading
+#      zero as octal.
+if (( 10#$h24 > photostart && 10#$h24 < photostop ))
 then
 	noise "Taking photo with webcam"
 	noise "	   file:	$file"

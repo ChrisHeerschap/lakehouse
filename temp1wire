@@ -29,7 +29,7 @@ do
 	temp=$((temp*9/5+32000))
 	# Fake out a decimal value
 	temp=${temp:0:-3}.${temp:0-3}
-	echo -n "$sn,$tf,"
+	echo -n "$sn,$temp,"
 done
 
 # Finish up with current CPU temp

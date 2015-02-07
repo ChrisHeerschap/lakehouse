@@ -1,24 +1,51 @@
 #!/bin/bash
 
-# Doing all my dev work in the automount shared NFS dir from the NAS
-PATH=/data/shared/rpi/bin:$PATH
+#
+# Ultra-primitive thermostat program for RasPi with:
+#  (4) DS18B20 1-wire temp sensors connected to GPIO 4
+#  (1) 4-relay board connected to GPIO pins 5-8
+# Simulates four-zone heat, takes one optional arg:
+#  Target temp in deg C
+#
 
-# Define the GPIO pins to control with
-pins="5 6 7 8"
+# DEBUGGING
+if [[ -n $_DEBUG ]]
+then
+	echo "more debug"
+	exec > debug
+	set -x
+fi
+
+# Functions
+function noise {
+	(( NOISE )) && echo "$@"
+}
+
+# Trap to toggle noise/verbosity
+trap 'NOISE=$((1-NOISE))' SIGUSR1
+
+# The set temperature, in degrees C
+#  Defaults to 23 if not set.
+temp=${1:-23}
+
 # Define the sensor that goes with the appropriate pin
+#  ** This should be in a config file or something.
 sensor=(
 	[5]=28-00043101b0ff
 	[6]=28-00043108b4ff
 	[7]=28-000433033aff
 	[8]=28-031466a26bff
 )
+# Get the GPIO pins from the above array
+pins="${!sensor[@]}"
+
 # Directories for temp sensors and GPIO controls
 w1dir=/sys/bus/w1/devices/
 gpiodir=/sys/class/gpio
-# The set temperature, in degrees C
-temp=${1:-23}
 
 # Make sure the "pin" script is available
+#  ** Otherwise you'd have to control the pins with direct file access
+#  ** Could also make the "pin" script a function?
 if [[ $(type -t pin) != "file" ]]
 then
 	echo "ERROR: Missing command \"pin\". Exiting."
@@ -38,7 +65,7 @@ do
 done
 
 # Set a trap to disable all the relays on script exit
-trap 'for pin in $pins; do pin $pin on; done' EXIT
+trap 'for pin in $pins; do pin $pin on; pin $pin disable; done' EXIT
 
 # Start an infinite loop to monitor the pins
 while :

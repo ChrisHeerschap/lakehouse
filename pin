@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# Has to be run via sudo, so re-exec if necessary
+if (( EUID ))
+then
+	exec sudo $0 "$@"
+fi
+
+# Command line args
+pin=$1
+cmd=$2
+# Pin control directories
+gpio=/sys/class/gpio
+gpin=$gpio/gpio${pin}
+
+# General usage output
+function usage {
+	echo
+	echo "usage: $0 {pin} {cmd}"
+	echo "	Where \"cmd\" is one of:"
+	echo "		en[able]"
+	echo "		dis[able]"
+	echo "		in"
+	echo "		out"
+	echo "		dir"
+	echo "		on"
+	echo "		off"
+	echo "		val[ue]"
+	echo "		dir[ection]"
+	echo 
+}
+
+# Super basic command validity check.
+if [[ $pin != +([0-9]) ]] && [[ -z $cmd ]]
+then
+	usage
+	exit 1
+fi
+
+# Act on the commands
+case $cmd in
+	en*)	# Enable the pin
+		# Check to see if the pin is already exported
+		#  Exit silently if so
+		if [[ ! -d $gpin ]]
+		then
+			echo $pin > $gpio/export
+		fi
+		;;
+	dis*)	# Disable the pin
+		# Check to see if the pin isn't exported
+		#  Exit silently if not
+		if [[ -d $gpin ]]
+		then
+			echo $pin > $gpio/unexport
+		fi
+		;;
+	in|out) # Set control direction
+		# Make sure the pin is active
+		if [[ -d $gpin ]]
+		then
+			echo $cmd > ${gpin}/direction
+		else
+			echo "ERROR: Pin not active."
+			exit 1
+		fi
+		;;
+	dir*)	# View control direction
+		# Make sure the pin is active
+		if [[ -d $gpin ]]
+		then
+			cat ${gpin}/direction
+		else
+			echo "ERROR: Pin not active."
+			exit 1
+		fi
+		;;
+	on|off)	# Control output pin setting
+		# Make sure we're set to "out"
+		if [[ -d $gpin ]]
+		then
+			if [[ $(< $gpin/direction ) == out ]]
+			then
+				# Set value based on the length of the command
+				#  on  = 1
+				#  off = 0
+				echo $(( 3 - ${#cmd} )) > ${gpin}/value
+			else
+				echo "ERROR: Not an output pin."
+				exit 1
+			fi
+		else
+			echo "ERROR: Pin not active."
+			exit 1
+		fi
+		;;
+	val*)	# Read pin value
+		# Make sure the pin is active
+		if [[ -d $gpin ]]
+		then
+			cat ${gpin}/value
+		else
+			echo "ERROR: Pin not active."
+			exit 1
+		fi
+		;;
+
+	*)	# Unmatched command
+		echo "ERROR: Invalid command."
+		usage
+		exit 1
+		;;
+esac

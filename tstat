@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Doing all my dev work in the automount shared NFS dir from the NAS
+PATH=/data/shared/rpi/bin:$PATH
+
+# Define the GPIO pins to control with
+pins="5 6 7 8"
+# Define the sensor that goes with the appropriate pin
+sensor=(
+	[5]=28-00043101b0ff
+	[6]=28-00043108b4ff
+	[7]=28-000433033aff
+	[8]=28-031466a26bff
+)
+# Directories for temp sensors and GPIO controls
+w1dir=/sys/bus/w1/devices/
+gpiodir=/sys/class/gpio
+# The set temperature, in degrees C
+temp=${1:-23}
+
+# Make sure the "pin" script is available
+if [[ $(type -t pin) != "file" ]]
+then
+	echo "ERROR: Missing command \"pin\". Exiting."
+	exit 1
+fi
+
+# Initialize the pins
+#  IMPORTANT: the sense of the pins is reversed:
+#   "on"  means the relay is off - not energized
+#   "off" means the relay is activated
+for pin in $pins
+do
+	echo "Initialize pin #$pin..."
+	pin $pin enable
+	pin $pin out
+	pin $pin on
+done
+
+# Set a trap to disable all the relays on script exit
+trap 'for pin in $pins; do pin $pin on; done' EXIT
+
+# Start an infinite loop to monitor the pins
+while :
+do
+	# Step through each pin
+	for pin in $pins
+	do
+		# sensor directory
+		sensdir=$w1dir/${sensor[pin]}
+
+		# read the sensor
+		temp=$(awk -F= '/t=/ {print $2}' $sensdir/w1_slave)
+
+		# Get the current value
+		val=$(< $gpiodir/gpio${pin}/value )
+
+		# Output current state to the screen
+		printf "%1d %2d %1d " "$pin" "${temp:0:-3}" "$((1-val))"
+
+		# If below the set temp, call for heat.
+		if (( temp < ( temp * 1000 ) && val == 1 ))
+		then
+			# close the relay
+			echo -n "ON"
+			pin $pin off
+		elif (( temp > ( temp * 1000 ) && val == 0 ))
+		then
+			# Open the relay
+			echo -n "OFF"
+			pin $pin on
+		fi
+	done
+	# Break the screen line
+	echo
+	# Pause before rechecking
+	sleep 2
+done
+

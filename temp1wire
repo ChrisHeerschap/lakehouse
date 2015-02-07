@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Set up the vars
+now=$(date +%s)
+# Specific to the Dallas 1-wire temp sensors such as the DS18B20
+w1dir=/sys/bus/w1/devices
+prefix=28-
+tempfile=w1_slave
+# Output to a CSV file
+outcsv=${outcsv:-$(date +%y%m%d).csv}
+config=~/.temp1wire.cfg 
+# Load the config file if it exists
+[[ -f $config ]] && . $config
+
+cd $w1dir
+
+# Run all output to the output CSV file
+exec >> $outcsv
+
+# Start the CSV line with the current timestamp (epoch seconds)
+echo -n "$now,"
+
+# Read each sensor and log it
+for sensor in ${prefix}*
+do
+	sn=${sensor#$prefix}
+	temp=$(awk -F= '/t=/ {print $2}' $sensor/$tempfile)
+	# Convert millideg C to millideg F
+	temp=$((temp*9/5+32000))
+	# Fake out a decimal value
+	temp=${temp:0:-3}.${temp:0-3}
+	echo -n "$sn,$tf,"
+done
+
+# Finish up with current CPU temp
+tcpu=$(< /sys/class/thermal/thermal_zone0/temp)
+# Convert millideg C to millideg F
+tcpu=$((tcpu*9/5+32000))
+# Fake out a decimal value
+tcpu=${tcpu:0:-3}.${tcpu:0-3}
+echo "cpu,$tcpu"
+

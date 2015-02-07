@@ -16,3 +16,7 @@ Monitor temps on any installed 1-wire sensors (DS18B20) and the CPU
 tstat
 
 Ultra primitive thermostat written in bash
+
+noisetoggle
+
+A way to toggle the verbosity (to STDERR) of a long-running/looping script via SIGUSR1

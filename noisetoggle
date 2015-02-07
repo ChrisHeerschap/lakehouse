@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# This isn't a functional script, but a demonstration of how 
+#  verbose logging to STDERR could be toggled via a SIGUSR1
+
+# DEBUGGING
+if [[ -n $_DEBUG ]]
+then
+	echo "more debug"
+	exec 2> debug
+	set -x
+fi
+
+# Default to non-noisy
+NOISE=0
+
+# Process options to be verbose or quiet
+while getopts ":vq" opt
+do
+	case $opt in
+		v)	# Noisy/verbose
+			NOISE=1;;
+		q)	# Quiet
+			NOISE=0;;
+	esac
+done
+shift $((OPTIND-1))
+
+# Set a trap to toggle on SIGUSR1
+trap 'NOISE=$((1-NOISE)); echo "Noise: $NOISE" >&2' SIGUSR1
+
+# Noise function
+function noise {
+	# If NOISE is set, echo function args to STDERR
+	(( NOISE )) && echo "$@" >&2
+}
+
+# Here's the loop that would do things
+while :
+do
+	# Do things in the loop
+	...command things...
+
+	# Optionally log output to STDERR
+	noise "Status of the loop..."
+
+	# Loop delay
+	sleep 10
+done

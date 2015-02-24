@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# Create an RRD file
+#
+# Started life here: http://lazydroid.com/2013/05/raspberry-pi-monitoring-cpu-temperature-with-rrdtool/
+
+# Current timestamp in seconds since epoch
+now=$(date +%s)
+dir=~/rrd/
+
+# Start in the proper directory
+cd $dir
+
+if [[ -n $1 ]]
+then
+	rrd=$1
+else
+	echo "ERROR: usage: $0 {rrd name}"
+	exit 1
+fi
+
+
+# create database if needed
+if [[ ! -f ${rrd}.rrd ]]
+then
+	# Initialize the rrd with a 300 second step (default)
+	#  DS:${x}:GAUGE:1200:U:U	datasource "${x}" is a gauge, heartbeat is 1200sec, max and min are unknown
+	#   round-robin archives where half of the data must be known for a period and 3200 rows are kept:
+	#  RRA:AVERAGE:0.5:1:3200	Single step
+	#  RRA:AVERAGE:0.5:6:3200	6 steps
+	#  RRA:AVERAGE:0.5:36:3200	32
+	#  RRA:AVERAGE:0.5:144:3200	144
+	#  RRA:AVERAGE:0.5:1008:3200	1008
+	#  RRA:AVERAGE:0.5:4320:3200	4320
+	#  RRA:AVERAGE:0.5:52560:3200	52560 steps
+	#  RRA:AVERAGE:0.5:525600:3200	525600 steps
+	# If you're creating an RRD to include past history, use the following:
+	# --start 1422069844 \
+	/usr/bin/rrdtool create ${rrd}.rrd \
+		DS:${rrd}:GAUGE:1200:U:U \
+		RRA:AVERAGE:0.5:1:3200 \
+		RRA:AVERAGE:0.5:6:3200 \
+		RRA:AVERAGE:0.5:36:3200 \
+		RRA:AVERAGE:0.5:144:3200 \
+		RRA:AVERAGE:0.5:1008:3200 \
+		RRA:AVERAGE:0.5:4320:3200 \
+		RRA:AVERAGE:0.5:52560:3200 \
+		RRA:AVERAGE:0.5:525600:3200
+fi

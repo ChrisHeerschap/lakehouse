@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# debugging
+#exec 2> debug-suntimes
+#set -x 
+
+# url
+url='http://api.sunrise-sunset.org/json'
+# How many minutes to stretch the windows?
+window=30
+# What timezone are we in?
+TZ=EST5EDT
+# Output format
+format="%H%M"
+
+# Where to write out the times?
+varfile=~/.suntimes
+
+# Get latitude and longitude from the config file
+cfg=~/.suntimes.cfg
+# Check it and read it
+if [[ -r $cfg ]]
+then
+	. $cfg
+	[[ -z $lat ]] && echo "ERROR: Latitude not set in config file: $cfg" && exit 1
+	[[ -z $lon ]] && echo "ERROR: Longitude not set in config file: $cfg" && exit 1
+else
+	echo "ERROR: Config file $cfg not readable." && exit 1
+fi
+
+# Get the times (in GMT) from the sunrise-sunset.org API
+suntimes="$(curl -s "${url}?lat=${lat}&lng=${lon}&date=today" | cut -f 6,10 -d'"' --output-delimiter=';')"
+#suntimes="11:43:42 AM;10:44:31 PM"
+
+# Get the sunrise and sunset times
+sunrise="$(TZ=$TZ date -d "${suntimes%%;*} GMT" +"%-l:%M %p")"
+photostart="$(TZ=$TZ date -d "${suntimes%%;*} GMT - 30 minutes" +"$format")"
+sunset="$(TZ=$TZ date -d "${suntimes##*;} GMT" +"%-l:%M %p")"
+photoend="$(TZ=$TZ date -d "${suntimes##*;} GMT + 30 minutes" +"$format")"
+
+# Dump these times into the file to be read by the photo program
+{
+	echo "sunrise=\"$sunrise\""
+	echo "sunset=\"$sunset\""
+	echo "photostart=$photostart"
+	echo "photoend=$photoend"
+} > $varfile

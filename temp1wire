@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# debugging
+if [[ -n $_DEBUG ]]
+then
+	exec 2> /tmp/debug-t1w
+	set -x
+fi
+
 # Set up the vars
 now=$(date +%s)
 # Specific to the Dallas 1-wire temp sensors such as the DS18B20
@@ -29,7 +36,18 @@ do
 	temp=$((temp*9/5+32000))
 	# Fake out a decimal value
 	temp=${temp:0:-3}.${temp:0-3}
-	echo -n "$sn,$temp,"
+	# Only report the temp
+	echo -n "$temp,"
+	# log this value
+	zone=${sensorname[$sensor]}
+	rrdtool update $rrddir/${zone}temp.rrd $now:$temp
+	if [[ $zone == fl1 ]]
+	then
+		inTemp=$temp
+	elif [[ $zone = out ]]
+	then
+		outTemp=$temp
+	fi
 done
 
 # Finish up with current CPU temp
@@ -38,5 +56,39 @@ tcpu=$(< /sys/class/thermal/thermal_zone0/temp)
 tcpu=$((tcpu*9/5+32000))
 # Fake out a decimal value
 tcpu=${tcpu:0:-3}.${tcpu:0-3}
-echo "cpu,$tcpu"
+echo "$tcpu"
 
+# Update rrd
+rrdtool update $rrddir/cputemp.rrd $now:$tcpu
+
+# Take a photo with the USB webcam
+nowimg=$wwwdir/now.jpg
+rm -f $nowimg
+fswebcam -q -r 640x480 $camdir/$(date +%y%m%d-%H%M.jpg) $nowimg
+
+# Update the rrd graphs
+/usr/bin/rrdtool graph $wwwdir/outtemp.png DEF:outtemp=$rrddir/outtemp.rrd:outtemp:AVERAGE LINE2:outtemp#00FF00 > /dev/null
+/usr/bin/rrdtool graph $wwwdir/intemp.png DEF:fl1temp=$rrddir/fl1temp.rrd:fl1temp:AVERAGE LINE2:fl1temp#FF0000 DEF:fl2temp=$rrddir/fl2temp.rrd:fl2temp:AVERAGE LINE2:fl2temp#0000FF > /dev/null
+/usr/bin/rrdtool graph $wwwdir/cputemp.png DEF:cputemp=$rrddir/cputemp.rrd:cputemp:AVERAGE LINE2:cputemp#00FF00 > /dev/null
+
+# Generate the HTML page
+# Write the HTML status file
+noise "Updating HTML file"
+cat << EOF > $wwwdir/now.html
+<HEAD>
+<meta http-equiv="refresh" content="300">
+<TITLE>Monitor</TITLE>
+</HEAD>
+<BODY>
+<TABLE CELLPADDING=10>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $nowimg) +"%m/%d/%y %l:%M %P")</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inTemp%??}</TH><TD><FONT SIZE=+7>F</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outTemp%??}</TH><TD><FONT SIZE=+7>F</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Temp last updated: $mo/$da/$yr $h12:$mi $pm</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=intemp.png></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outtemp.png></TD></TR>
+</TD></TR></TABLE>
+</BODY>
+EOF

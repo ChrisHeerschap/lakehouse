@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # Debugging set if var "_DEBUG" is non-null
+_DEBUG=1
 if [[ -n $_DEBUG ]]
 then
 	echo "debug on"
-	exec 2> debug
+	exec 2> /tmp/debug
 	set -x
 fi
 
@@ -26,8 +27,14 @@ file="$stodir/$yr$mo$da-$h24$mi.jpg"
 # Filename for the most recent file
 now="$dir/now.jpg"
 # Times to start and stop taking photos
-photostart=6
-photostop=18
+photostart=0600
+photostop=1800
+# Read the times from an external file if it exists
+suntimes=~/.suntimes
+if [[ -r $suntimes ]]
+then
+	. $suntimes
+fi
 # Swap out this image if the taken photo is too dark
 dark="$dir/images/toodark.jpg"
 # Swap out this image if we're outside of the camera's time range
@@ -41,7 +48,7 @@ out="$dir/now.html"
 # Track temps in this csv (rotate daily)
 csv="$stodir/temp-$yr$mo$da.csv"
 # Low temperature - alert if inside temp is under this (deg F)
-lowtemp=45
+lowtemp=48
 # Default to non-verbose output
 NOISE=0
 
@@ -57,6 +64,21 @@ fi
 ##### FUNCTIONS DEFS #####
 function noise {
 	(( NOISE )) && echo "$*"
+}
+
+# Get my temperature from the DS18B20 1-wire sensor
+function mytemp {
+	# Read the current temp from the DS18B20 if it is attached
+	w1=$(ls /sys/bus/w1/devices/*/w1_slave)
+	if [[ -r $w1 ]]
+	then
+		# Read the temp
+		myTemp=$(awk -F= '/t=/ {print $2}' $w1)
+		# Convert to millideg F
+		myTemp=$((myTemp * 9/5 + 32000))
+		# Convert to deg F
+		myTemp=${myTemp:0:-3}.${myTemp:0-3}
+	fi
 }
 
 # Check if we're running from an interactive session
@@ -96,7 +118,7 @@ mkdir -p $stodir
 #  NB: have to specify values as base 10 with "10#" prefix to avoid 08/09 being 
 #      interpreted as bad octal values. Bash will interpret a number with a leading
 #      zero as octal.
-if (( 10#$h24 > photostart && 10#$h24 < photostop ))
+if (( 10#$h24$mi > 10#$photostart && 10#$h24$mi < 10#$photostop ))
 then
 	noise "Taking photo with webcam"
 	noise "	   file:	$file"
@@ -126,6 +148,9 @@ else
 	fi
 fi
 
+# Get the temp from my DS18B20 temp sensor (if attached)
+mytemp
+
 # Get the temps from the weather station
 #  * Grab the live data page
 #  * grep the lines for inside and outside temp and humidity
@@ -134,17 +159,27 @@ fi
 noise "Getting temp/humidity info from weather station"
 eval $(curl -s $url | egrep "(in|out)(Temp|Humi)" | cut -f 4,14 -d'"' --output-delimiter='=')
 
+# Use my temp over the weather station if it's set
+refTemp=${myTemp:-$inTemp}
+
+# Trim decimal places if refTemp has too many
+#  Todo: figure out how to nicely trim arbitrary number of decimal places to one
+if [[ $refTemp == *.??? ]]
+then
+	refTemp=${refTemp%??}
+fi
+
 # Alert if it's too cold
-if (( ${inTemp%%.*} < lowtemp ))
+if (( ${refTemp%%.*} < lowtemp ))
 then
 	if [[ -n $alert ]]
 	then
 		# Send an alert on the low temp condition
 		noise "Alerting on low temp condition ($inTemp)"
-		echo "ALERT: Inside temp is $inTemp!" | mail -s "ALERT: Lakehouse temp" $alert
+		echo "ALERT: Inside temp is $refTemp!" | mail -s "ALERT: Lakehouse temp" $alert
 	else
 		# alert address not set! Log some errors and hope they're seen
-		msg="WARNING: No alert address set and current temp: $inTemp"
+		msg="WARNING: No alert address set and current temp: $refTemp"
 		logger -t MONITOR -p user.crit "$msg"
 		echo "$msg" >&2
 	fi
@@ -152,7 +187,7 @@ fi
 
 # Log the values to the csv file
 noise "Updating data points to CSV file $csv"
-echo "$es,$inTemp,$inHumi,$outTemp,$outHumi" >> $csv
+echo "$es,$inTemp,$inHumi,$outTemp,$outHumi${myTemp:+,}$myTemp" >> $csv
 
 # Get the CPU temp
 cpuTemp=$(< /sys/class/thermal/thermal_zone0/temp)
@@ -164,7 +199,7 @@ cpuTemp="${cpuTemp:0:-3}.${cpuTemp:0-3}"
 logger -t cpuTemp -p user.info "got cpu temp $cpuTemp at timestamp $es"
 
 # Update the RRD files and graphs
-for rrd in inTemp outTemp cpuTemp
+for rrd in inTemp outTemp cpuTemp myTemp
 do
 	noise "Updating the RRD graph $rrd"
 	# Update the RRD file
@@ -172,6 +207,12 @@ do
 	# Regenerate the graphs
 	/usr/bin/rrdtool graph $dir/${rrd}.png DEF:temp=$rrddir/${rrd}.rrd:${rrd}:AVERAGE LINE2:temp#00FF00 > /dev/null
 done
+
+# One graph to graph them all
+/usr/bin/rrdtool graph $dir/tempGraph.png -w 640 -h 320 -D \
+	DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE LINE2:inTemp#00FF00:"Weather station inside" \
+	DEF:outTemp=$rrddir/outTemp.rrd:outTemp:AVERAGE LINE2:outTemp#000000:"outside" \
+	DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE LINE2:myTemp#0000FF:"my temp"
 
 
 # Write the HTML status file
@@ -186,14 +227,17 @@ cat << EOF > $out
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$inTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$refTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
+<!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR>
+<!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Temp last updated: $mo/$da/$yr $h12:$mi $pm</TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outTemp.png></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Temperature trends:<BR><IMG SRC=tempGraph.png></TD></TR>
+<!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outTemp.png></TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2>Wunderground</A></TD></TR>
+<!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y lake.jpg) +"%m/%d/%y %l:%M %P")</TD></TR> -->
 </TD></TR></TABLE>
 </BODY>
 EOF

@@ -1,0 +1,133 @@
+#!/bin/bash
+
+# debugging
+if [[ -n $_DEBUG ]]
+then
+	exec 2> /tmp/debug-uptemp
+	set -x
+fi
+
+# Logging output
+log=/data/shared/rpi/tstat/$(date +%y%m%d).log
+exec > $log
+
+# Enable bash extended globs
+shopt -s extglob
+
+# Error function
+function error {
+	echo "ERROR: $*" >&2
+	# SHUT OFF THE HEAT
+	#  Remember that "1" is "off" with the relay board!!
+	echo 1 > /sys/class/gpio/gpio5/value
+	# Exit with an error status
+	exit 1
+}
+
+# Loop to bring up the heat
+function uptemp {
+	$pin 5 off 
+	sleep 15
+
+	while :
+	do
+		# Get the current temp
+		curtemp=$(gettemp)
+
+		# Status line
+		echo "$(date +%s):$curtemp:1"
+
+		# 
+		if (( curtemp > $tgtc ))
+		then
+			# Announce success
+			echo "Target $target acheived at $(date)"
+			# Shut off the heat
+			$pin 5 on
+			break
+		fi
+		sleep 15
+	done
+}
+
+
+# Trap to shut off the heat on exit
+trap 'echo 1 > /sys/class/gpio/gpio5/value' exit
+
+# Set and source the config file
+cfg=~/.temp1wire.cfg
+if [[ ! -f "$cfg" ]]
+then
+	error "ERROR: Can't find config file $cfg. Exiting."
+else
+	. "$cfg"
+fi
+
+# make sure the pin command is available
+if [[ ! -x $pin ]]
+then
+	error "ERROR: Can't execute \"pin\" command. Please define it in the $cfg config file."
+fi
+
+# set vars and get params
+zone='fl1'
+sensor="28-031466a20dff"
+senspath="/sys/bus/w1/devices/$sensor/w1_slave"
+
+# define a function to get the current temp
+function gettemp {
+	awk -F= '/t=/ {print $2}' $senspath
+}
+
+# Make sure we have a valid sensor
+if [[ "$sensor" != 28-+([0-9a-f]) ]]
+then
+	error "ERROR: Couldn't find sensor for zone $zone, exiting."
+fi
+
+# Get the target temp from the command line, default to 52 deg F
+target=${1:-52}
+if [[ $target != +([0-9]) ]]
+then
+	error "ERROR: Target temp \"$target\" isn't a number. Fuck off."
+fi
+
+# Make sure the target temp isn't insane
+if (( target > 60 || target < 40 ))
+then
+	error "ERROR: Target temp \"$target\" is fucking retarded. Screw off."
+fi
+
+# Convert target temp to millideg C
+#  PROTIP: multiply by 1000 before doing the 5/9 conversion to avoid losing fractions.
+tgtc=$(( (target-32) * 1000 * 5/9 ))
+
+# Initialize pin 5
+$pin 5 en || error "Problem enabling pin 5."
+$pin 5 out || error "Problem setting pin 5 to output."
+sleep 1 # because the pin may come up off, which is relay on - don't slap it on and then immediately off.
+$pin 5 on || error "Problem shutting off relay."
+
+# Check and output the current temp
+curtemp=$(gettemp)
+echo "Current temp: $curtemp millideg C"
+echo "Target temp: $tgtc millideg C"
+
+# Infinite loop to monitor temp and kick it up if necessary
+while :
+do
+	# Fire up the heat if necessary
+	if (( curtemp < $tgtc - 1 ))
+	then
+		uptemp
+	else
+		# Just log the temp
+		echo "$(date +%s):$curtemp:0"
+		sleep 15
+		curtemp=$(gettemp)
+	fi
+done
+
+# Shut off the heat and exit successfully (should not happen)
+echo 1 > /sys/class/gpio/gpio5/value
+exit 0

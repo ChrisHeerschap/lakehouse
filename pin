@@ -1,17 +1,58 @@
 #!/bin/bash
 
+# Debugging
+if [[ -n $_DEBUG ]]
+then
+	exec 2> debug
+	set -x
+fi
+
 # Has to be run via sudo, so re-exec if necessary
 if (( EUID ))
 then
 	exec sudo $0 "$@"
 fi
 
-# Command line args
-pin=$1
-cmd=$2
+##### Var defs
 # Pin control directories
 gpio=/sys/class/gpio
-gpin=$gpio/gpio${pin}
+
+# Process command line args
+# Build the list of pins to work on
+#  * Take a comma-delimited list
+#  * Take any number of space-delimited numbers
+until [[ $1 != +([0-9,]) ]]
+do
+	# Take args with commas as a delimited list of pins
+	if [[ $1 == *,* ]]
+	then
+		# Change commas to spaces and append to pinlist
+		pinlist="$pinlist ${1//,/ }"
+	else
+		# Add the pin to the pinlist
+		pinlist="$pinlist $1"
+	fi
+
+	# Drop this arg
+	shift
+done
+
+# Build the command list with the remaining args
+while [[ -n $1 ]]
+do
+	# Check to see if the arg is a comma-delimited list
+	if [[ $1 == *,* ]]
+	then
+		# Change commas to spaces and append to cmdlist
+		cmdlist="$cmdlist ${1//,/ }"
+	else
+		# Add the command to the cmdlist
+		cmdlist="$cmdlist $1"
+	fi
+
+	# Drop this arg
+	shift
+done
 
 # General usage output
 function usage {
@@ -31,83 +72,97 @@ function usage {
 }
 
 # Super basic command validity check.
-if [[ $pin != +([0-9]) ]] && [[ -z $cmd ]]
+if [[ -z $pinlist || -z $cmdlist ]]
 then
 	usage
 	exit 1
 fi
 
-# Act on the commands
-case $cmd in
-	en*)	# Enable the pin
-		# Check to see if the pin is already exported
-		#  Exit silently if so
-		if [[ ! -d $gpin ]]
-		then
-			echo $pin > $gpio/export
-		fi
-		;;
-	dis*)	# Disable the pin
-		# Check to see if the pin isn't exported
-		#  Exit silently if not
-		if [[ -d $gpin ]]
-		then
-			echo $pin > $gpio/unexport
-		fi
-		;;
-	in|out) # Set control direction
-		# Make sure the pin is active
-		if [[ -d $gpin ]]
-		then
-			echo $cmd > ${gpin}/direction
-		else
-			echo "ERROR: Pin not active."
-			exit 1
-		fi
-		;;
-	dir*)	# View control direction
-		# Make sure the pin is active
-		if [[ -d $gpin ]]
-		then
-			cat ${gpin}/direction
-		else
-			echo "ERROR: Pin not active."
-			exit 1
-		fi
-		;;
-	on|off)	# Control output pin setting
-		# Make sure we're set to "out"
-		if [[ -d $gpin ]]
-		then
-			if [[ $(< $gpin/direction ) == out ]]
-			then
-				# Set value based on the length of the command
-				#  on  = 1
-				#  off = 0
-				echo $(( 3 - ${#cmd} )) > ${gpin}/value
-			else
-				echo "ERROR: Not an output pin."
-				exit 1
-			fi
-		else
-			echo "ERROR: Pin not active."
-			exit 1
-		fi
-		;;
-	val*)	# Read pin value
-		# Make sure the pin is active
-		if [[ -d $gpin ]]
-		then
-			cat ${gpin}/value
-		else
-			echo "ERROR: Pin not active."
-			exit 1
-		fi
-		;;
+# Step through the listed pins (in order)
+for pin in $pinlist
+do
+	# Set the GPIO directory
+	gpin=$gpio/gpio${pin}
 
-	*)	# Unmatched command
-		echo "ERROR: Invalid command."
-		usage
-		exit 1
-		;;
-esac
+	# Step through the listed commands (in order)
+	for cmd in $cmdlist
+	do
+		case $cmd in
+			pause)	# Do nothing but sleep for a second
+				#  This is useful between setting a pin to out and changing its value
+				sleep 1
+				;;
+			en*)	# Enable the pin
+				# Check to see if the pin is already exported
+				#  Exit silently if so
+				if [[ ! -d $gpin ]]
+				then
+					echo $pin > $gpio/export
+				fi
+				;;
+			dis*)	# Disable the pin
+				# Check to see if the pin isn't exported
+				#  Exit silently if not
+				if [[ -d $gpin ]]
+				then
+					echo $pin > $gpio/unexport
+				fi
+				;;
+			in|out) # Set control direction
+				# Make sure the pin is active
+				if [[ -d $gpin ]]
+				then
+					echo $cmd > ${gpin}/direction
+				else
+					echo "ERROR: Pin not active."
+					exit 1
+				fi
+				;;
+			dir*)	# View control direction
+				# Make sure the pin is active
+				if [[ -d $gpin ]]
+				then
+					cat ${gpin}/direction
+				else
+					echo "ERROR: Pin not active."
+					exit 1
+				fi
+				;;
+			on|off)	# Control output pin setting
+				# Make sure we're set to "out"
+				if [[ -d $gpin ]]
+				then
+					if [[ $(< $gpin/direction ) == out ]]
+					then
+						# Set value based on the length of the command
+						#  on  = 1
+						#  off = 0
+						echo $(( 3 - ${#cmd} )) > ${gpin}/value
+					else
+						echo "ERROR: Not an output pin."
+						exit 1
+					fi
+				else
+					echo "ERROR: Pin not active."
+					exit 1
+				fi
+				;;
+			val*)	# Read pin value
+				# Make sure the pin is active
+				if [[ -d $gpin ]]
+				then
+					cat ${gpin}/value
+				else
+					echo "ERROR: Pin not active."
+					exit 1
+				fi
+				;;
+
+			*)	# Unmatched command
+				echo "ERROR: Invalid command."
+				usage
+				exit 1
+				;;
+		esac
+	done
+done

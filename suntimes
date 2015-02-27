@@ -36,12 +36,12 @@ suntimes="$(curl -s "${url}?lat=${lat}&lng=${lon}&date=today" | cut -f 6,10 -d'"
 sunrise="$(TZ=$TZ date -d "${suntimes%%;*} GMT" +"%-l:%M %p")"
 photostart="$(TZ=$TZ date -d "${suntimes%%;*} GMT - 30 minutes" +"$format")"
 sunset="$(TZ=$TZ date -d "${suntimes##*;} GMT" +"%-l:%M %p")"
-photoend="$(TZ=$TZ date -d "${suntimes##*;} GMT + 30 minutes" +"$format")"
+photostop="$(TZ=$TZ date -d "${suntimes##*;} GMT + 30 minutes" +"$format")"
 
 # Dump these times into the file to be read by the photo program
 {
 	echo "sunrise=\"$sunrise\""
 	echo "sunset=\"$sunset\""
 	echo "photostart=$photostart"
-	echo "photoend=$photoend"
+	echo "photostop=$photostop"
 } > $varfile

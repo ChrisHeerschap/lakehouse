@@ -210,7 +210,7 @@ done
 
 # One graph to graph them all
 /usr/bin/rrdtool graph $dir/tempGraph.png -w 640 -h 320 -D \
-	DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE LINE2:inTemp#00FF00:"Weather station inside" \
+	DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE LINE4:inTemp#FF0000:"Weather station inside" \
 	DEF:outTemp=$rrddir/outTemp.rrd:outTemp:AVERAGE LINE2:outTemp#000000:"outside" \
 	DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE LINE2:myTemp#0000FF:"my temp"
 
@@ -227,6 +227,8 @@ cat << EOF > $out
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y lake.jpg) +"%m/%d/%y %l:%M %P")</TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$refTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
 <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
@@ -236,8 +238,6 @@ cat << EOF > $out
 <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outTemp.png></TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2>Wunderground</A></TD></TR>
-<!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y lake.jpg) +"%m/%d/%y %l:%M %P")</TD></TR> -->
 </TD></TR></TABLE>
 </BODY>
 EOF

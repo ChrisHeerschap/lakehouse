@@ -1,0 +1,45 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          pageout
+# Required-Start:    $network
+# Required-Stop:     $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Send a page on boot
+# Description:       Send an email page on boot
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/bin
+
+. /lib/init/vars.sh
+. /lib/lsb/init-functions
+
+. /etc/default/pageout
+HOSTNAME=${HOSTNAME:-$(/bin/hostname)}
+
+do_start () {
+	echo "Host $HOSTNAME is booting." | /usr/bin/mailx -s "BOOT: $HOSTNAME" $ADMIN
+	exit $?
+}
+
+case "$1" in
+  start|"")
+	do_start
+	;;
+  restart|reload|force-reload)
+	echo "Error: argument '$1' not supported" >&2
+	exit 3
+	;;
+  stop)
+	# No-op
+	;;
+  status)
+	# No-op
+	;;
+  *)
+	echo "Usage: pageout start" >&2
+	exit 3
+	;;
+esac
+
+:

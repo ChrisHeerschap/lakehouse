@@ -228,7 +228,6 @@ cat << EOF > $out
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y lake.jpg) +"%m/%d/%y %l:%M %P")</TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$refTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
 <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>

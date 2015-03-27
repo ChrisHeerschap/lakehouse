@@ -4,7 +4,6 @@
 _DEBUG=1
 if [[ -n $_DEBUG ]]
 then
-	echo "debug on"
 	exec 2> /tmp/debug
 	set -x
 fi
@@ -212,7 +211,7 @@ done
 /usr/bin/rrdtool graph $dir/tempGraph.png -w 640 -h 320 -D \
 	DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE LINE4:inTemp#FF0000:"Weather station inside" \
 	DEF:outTemp=$rrddir/outTemp.rrd:outTemp:AVERAGE LINE2:outTemp#000000:"outside" \
-	DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE LINE2:myTemp#0000FF:"my temp"
+	DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE LINE2:myTemp#0000FF:"my temp" > /dev/null
 
 
 # Write the HTML status file

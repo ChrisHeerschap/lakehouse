@@ -235,7 +235,7 @@ cat << EOF > $out
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Temperature trends:<BR><IMG SRC=tempGraph.png></TD></TR>
 <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outTemp.png></TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2>Wunderground</A></TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2 TARGET="_blank">Wunderground</A></TD></TR>
 </TD></TR></TABLE>
 </BODY>
 EOF

@@ -48,6 +48,11 @@ out="$dir/now.html"
 csv="$stodir/temp-$yr$mo$da.csv"
 # Low temperature - alert if inside temp is under this (deg F)
 lowtemp=48
+warntemp=52
+# Table background colors: green = okay
+inBkg='#CCFFCC'
+outBkg='#CCFFCC'
+timeBkg='#CCCCFF'
 # Default to non-verbose output
 NOISE=0
 
@@ -171,6 +176,9 @@ fi
 # Alert if it's too cold
 if (( ${refTemp%%.*} < lowtemp ))
 then
+	# Set table background to red to indicate alert
+	inBkg='#ffcccc'
+	# Send an alert if it's set
 	if [[ -n $alert ]]
 	then
 		# Send an alert on the low temp condition
@@ -182,6 +190,16 @@ then
 		logger -t MONITOR -p user.crit "$msg"
 		echo "$msg" >&2
 	fi
+elif (( ${refTemp%.*} < warntemp ))
+then
+	# Set table background to orange to indicate warning
+	inBkg='#ffcc99'
+fi
+
+# Tag the background if it's under freezing outside
+if (( outTemp < 32 ))
+then
+	outBkg='#ffcc99'
 fi
 
 # Log the values to the csv file
@@ -208,10 +226,18 @@ do
 done
 
 # One graph to graph them all
+#  * Inside temp from weatherstation in green
+#  * Outside temp from weatherstation in black
+#  * Inside temp from Pi sensor in blue
+#  * Dashed horizontal line at freezing in cyan
+#  * Dashed horizontal line at the low temp alert point in orange
 /usr/bin/rrdtool graph $dir/tempGraph.png -w 640 -h 320 -D \
-	DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE LINE4:inTemp#FF0000:"Weather station inside" \
-	DEF:outTemp=$rrddir/outTemp.rrd:outTemp:AVERAGE LINE2:outTemp#000000:"outside" \
-	DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE LINE2:myTemp#0000FF:"my temp" > /dev/null
+	"DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE" "LINE4:inTemp#00FF00:Inside" \
+	"DEF:outTemp=$rrddir/outTemp.rrd:outTemp:AVERAGE" "LINE2:outTemp#000000:outside" \
+	"DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE" "LINE2:myTemp#0000FF:Pi temp" \
+	"HRULE:$warntemp#FF9900:Low warning:dashes" \
+	"HRULE:$lowtemp#FF0000:Low alert:dashes" \
+	"HRULE:32#00FFFF:Freezing" > /dev/null
 
 
 # Write the HTML status file
@@ -223,17 +249,18 @@ cat << EOF > $out
 </HEAD>
 <BODY>
 <TABLE CELLPADDING=10>
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR>
+  <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$refTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
-<!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
-<!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Temp last updated: $mo/$da/$yr $h12:$mi $pm</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=$inBkg><FONT SIZE=+10>$refTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
+  <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=$outBkg><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
+<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Last run</TD><TH BGCOLOR=$timeBkg><FONT SIZE=+10>$h12:$mi</TH><TD><FONT SIZE=+7>$pm</TD></TR>
+  <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
+  <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Temp last updated: $mo/$da/$yr $h12:$mi $pm</TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Temperature trends:<BR><IMG SRC=tempGraph.png></TD></TR>
-<!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
+  <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outTemp.png></TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2 TARGET="_blank">Wunderground</A></TD></TR>
 </TD></TR></TABLE>

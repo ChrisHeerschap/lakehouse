@@ -8,6 +8,10 @@ then
 	set -x
 fi
 
+##### Shell options
+# Enable extended globs
+shopt -s extglob
+
 ##### VAR DEFS #####
 # Use this file for var defs which override these defaults
 inifile="$HOME/.monitor.cfg"
@@ -46,6 +50,8 @@ url="http://${weather}/livedata.htm"
 out="$dir/now.html"
 # Track temps in this csv (rotate daily)
 csv="$stodir/temp-$yr$mo$da.csv"
+# Track CPU temps in this CSV
+cpucsv="$stodir/cputemp-$yr$mo$da.csv"
 # Low temperature - alert if inside temp is under this (deg F)
 lowtemp=48
 warntemp=52
@@ -161,7 +167,29 @@ mytemp
 #  * output them in the form "inTemp=64.2"
 #  * eval those lines to set the values in those variables
 noise "Getting temp/humidity info from weather station"
-eval $(curl -s $url | egrep "(in|out)(Temp|Humi)" | cut -f 4,14 -d'"' --output-delimiter='=')
+for try in {1..3}
+do
+	# Get times before and after trying to connect to the weather station
+	before=$(date +%s)
+	eval $(curl -s $url | egrep "(in|out)(Temp|Humi)" | cut -f 4,14 -d'"' --output-delimiter='=')
+	exitstat=$?
+	after=$(date +%s)
+
+	# DEBUGGING: Update runtime and temps to debugging CSV
+	echo "${before},$((after-before)),${exitstat},${inTemp},${outTemp}" >> ~/tmp/monitor-debug.csv
+
+	# Exit the loop if we have a valid reading for inTemp
+	if [[ $inTemp == +([0-9]).[0-9] ]]
+	then
+		break
+	else
+		# We don't have a valid inTemp reading. Alert on that.
+		# Check to see if it's alive
+		fping -q $weather && wstat='alive' || wstat='dead'
+		# Mail this line to the first address in alert.
+		echo "Null value for inTemp, try $try in $((after-before)) seconds - $weather is $wstat" | mail -s 'LakePi temp error' ${alert%%,*}
+	fi
+done
 
 # Use my temp over the weather station if it's set
 refTemp=${myTemp:-$inTemp}
@@ -197,7 +225,7 @@ then
 fi
 
 # Tag the background if it's under freezing outside
-if (( outTemp < 32 ))
+if (( ${outTemp%.*} < 32 ))
 then
 	outBkg='#ffcc99'
 fi
@@ -207,22 +235,35 @@ noise "Updating data points to CSV file $csv"
 echo "$es,$inTemp,$inHumi,$outTemp,$outHumi${myTemp:+,}$myTemp" >> $csv
 
 # Get the CPU temp
-cpuTemp=$(< /sys/class/thermal/thermal_zone0/temp)
+cpuTempC=$(< /sys/class/thermal/thermal_zone0/temp)
 # convert to fahrenheit (preserving the x1000 scale to fake FP math)
-cpuTemp=$((cpuTemp*9/5+32000))
+cpuTemp=$((cpuTempC*9/5+32000))
 # convert to decimal
 cpuTemp="${cpuTemp:0:-3}.${cpuTemp:0-3}"
-# Log it to syslog
-logger -t cpuTemp -p user.info "got cpu temp $cpuTemp at timestamp $es"
+# Log it to CSV
+echo "$es,$cpuTemp" >> $cpucsv
+#logger -t cpuTemp -p user.info "got cpu temp $cpuTemp at timestamp $es"
+# Check it and alert if it's ridiculously high
+if (( cpuTempC > 80000 ))
+then
+	echo "CPU temp high - $cpuTemp" | mail -s "LakePi CPU temp alert" $alert
+fi
 
 # Update the RRD files and graphs
 for rrd in inTemp outTemp cpuTemp myTemp
 do
-	noise "Updating the RRD graph $rrd"
+	# Don't update if the value is null.
+	if [[ -z $(eval echo \$$rrd) ]]
+	then
+		noise "Null value for $rrd - skipping the update"
+		continue
+	fi
+
 	# Update the RRD file
+	noise "Updating the RRD graph $rrd"
 	/usr/bin/rrdtool update $rrddir/${rrd}.rrd $es:$(eval echo \$$rrd)
-	# Regenerate the graphs
-	/usr/bin/rrdtool graph $dir/${rrd}.png DEF:temp=$rrddir/${rrd}.rrd:${rrd}:AVERAGE LINE2:temp#00FF00 > /dev/null
+	# Regenerate the graphs - disabled as I'm not currently using them
+	#/usr/bin/rrdtool graph $dir/${rrd}.png DEF:temp=$rrddir/${rrd}.rrd:${rrd}:AVERAGE LINE2:temp#00FF00 > /dev/null
 done
 
 # One graph to graph them all

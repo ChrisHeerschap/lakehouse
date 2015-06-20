@@ -1,0 +1,74 @@
+#!/bin/bash
+
+exec 2> /tmp/debug-diskcheck
+set -x
+
+# Super ghetto local disk checker
+# get alert address from the .monitor.cfg
+. ~/.monitor.cfg
+# FYI address is only the first email listed in the "alert" var from the .monitor.cfg
+fyi=${alert%%,*}
+# Check to make sure the alert address is set
+if [[ -z $alert ]]
+then
+	msg="ERROR: Alert address is not set. Please set it in ~/.monitor.cfg"
+	echo "$msg" >&2
+	logger -p user.crit -t DISKCHECK "$msg"
+	exit 1
+fi
+
+# Set the check and limits
+check=/usr/lib/nagios/plugins/check_disk
+warn=20%
+crit=5%
+warnfile=/var/tmp/diskcheck.warn
+
+# Set a trap to alert if anything has an error
+#trap "echo Error encountered on line \$LINENO | mailx -s \"$HOSTNAME disk error\" $fyi" ERR
+
+# Run the disk check
+msg=$($check -w $warn -c $crit -l -X tmpfs -X devtmpfs -X rootfs)
+es=$?
+
+# Shitcan the warnfile if over a day old
+if [[ -f $warnfile ]]
+then
+	find $warnfile -mtime +1 -delete
+fi
+
+# Act on the results
+case $msg in
+	*OK*)
+		# Log that we ran. Yay.
+		logger -p user.info -t DISKCHECK "$msg"
+		# Clear out the warnfile if it exists
+		rm -f $warnfile
+		;;
+	*WARNING*)
+		if [[ ! -f $warnfile ]]
+		then
+			# Mail the fyi address
+			echo -e "$HOSTNAME\n$msg" | mailx -s "$HOSTNAME disk warming!" $fyi
+			# Log the warning
+			logger -p user.warn -t DISKCHECK "$msg"
+			# Touch the warnfile so it doesn't warn again until it's cleared (see above)
+			touch $warnfile
+		else
+			# Only warn once a day.
+			: Warn file $warnfile exists, only warning once a day.
+			exit 0
+		fi
+		;;
+	*CRITICAL*)
+		# Mail the FYI and alert addresses
+		echo -e "$HOSTNAME\n$msg" | mailx -s "$HOSTNAME disk critical!" $alert
+		# Log the critical message
+		logger -p user.crit -t DISKCHECK "$msg"
+		# Shitcan the warnfile, no matter how old it is.
+		rm -f $warnfile
+		;;
+esac
+
+# Exit cleanly
+: Clean exit
+exit 0

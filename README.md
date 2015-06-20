@@ -45,3 +45,8 @@ uptemp
 ======
 
 An actually functional but still ugly and primitive thermostat in bash.
+
+diskcheck
+=========
+
+Small shell script that calls the nagios plugin check_disk to monitor disk usage.

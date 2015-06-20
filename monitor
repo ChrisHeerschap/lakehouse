@@ -42,6 +42,8 @@ fi
 dark="$dir/images/toodark.jpg"
 # Swap out this image if we're outside of the camera's time range
 nophoto="$dir/images/nophoto.jpg"
+# Swap out this image if no camera is detected
+nocamera="$dir/images/nocamera.jpg"
 # IP of the weather station
 weather='192.168.113.11'
 # URL of the live data page on the weather station
@@ -124,37 +126,52 @@ cd $dir
 # Make the storage dir
 mkdir -p $stodir
 
-# Take a photo with the onboard camera if the time is between 6am and 6pm
-#  NB: have to specify values as base 10 with "10#" prefix to avoid 08/09 being 
-#      interpreted as bad octal values. Bash will interpret a number with a leading
-#      zero as octal.
-if (( 10#$h24$mi > 10#$photostart && 10#$h24$mi < 10#$photostop ))
+# Check to see if the onboard camera is connected
+#  The "vcgencmd get_camera" returns "supported=# detected=#" where # is 0/1
+#  Set these vars using eval so we can just check and see if the camera is detected
+#  and skip all the other work
+eval $( vcgencmd get_camera )
+if (( detected ))
 then
-	noise "Taking photo with webcam"
-	noise "	   file:	$file"
-	noise "	current:	$now"
-	/usr/bin/raspistill -n -w 640 -h 480 -vf -hf -e jpg -awb fluorescent -x none -ev +1 -sa 0 -o $file -l $now
-
-	# Check to see if the image is too dark
-	noise "Checking photo exposure"
-	mean="$(identify -format '%[mean]' $now)"
-	# Drop the decimal (bash doesn't understand fp numbers)
-	mean="${mean%%.*}"
-
-	# 1000 seems to be a good level to qualify as "too dark".
-	if (( mean < 1000 ))
+	# Take a photo with the onboard camera if the time is between 6am and 6pm
+	#  NB: have to specify values as base 10 with "10#" prefix to avoid 08/09 being 
+	#      interpreted as bad octal values. Bash will interpret a number with a leading
+	#      zero as octal.
+	if (( 10#$h24$mi > 10#$photostart && 10#$h24$mi < 10#$photostop ))
 	then
-		noise "Replacing photo with \"too dark\" message"
-		rm $now
-		ln -s $dark $now
+		noise "Taking photo with webcam"
+		noise "	   file:	$file"
+		noise "	current:	$now"
+		/usr/bin/raspistill -n -w 640 -h 480 -vf -hf -e jpg -awb fluorescent -x none -ev +1 -sa 0 -o $file -l $now
+
+		# Check to see if the image is too dark
+		noise "Checking photo exposure"
+		mean="$(identify -format '%[mean]' $now)"
+		# Drop the decimal (bash doesn't understand fp numbers)
+		mean="${mean%%.*}"
+
+		# 1000 seems to be a good level to qualify as "too dark".
+		if (( mean < 1000 ))
+		then
+			noise "Replacing photo with \"too dark\" message"
+			rm $now
+			ln -s $dark $now
+		fi
+	else
+		# Outside the camera's runtime (aka night) - swap in the no photo image
+		noise "Skipping photo due to time"
+		if [[ ! $now -ef $nophoto ]]
+		then
+			rm $now
+			ln -s $nophoto $now
+		fi
 	fi
 else
-	# Outside the camera's runtime (aka night) - swap in the no photo image
-	noise "Skipping photo due to time"
-	if [[ ! $now -ef $nophoto ]]
+	# Stuff to do when the camera isn't there.
+	if [[ ! $now -ef $nocamera ]]
 	then
 		rm $now
-		ln -s $nophoto $now
+		ln -s $nocamera $now
 	fi
 fi
 
@@ -291,8 +308,8 @@ cat << EOF > $out
 <BODY>
 <TABLE CELLPADDING=10>
   <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR>
+  <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
+       <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR> -->
 <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
 <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=$inBkg><FONT SIZE=+10>$refTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
   <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->

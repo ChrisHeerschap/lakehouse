@@ -36,6 +36,13 @@ then
 	find $warnfile -mtime +1 -delete
 fi
 
+# Override the test results with the command line
+if [[ -n $1 ]]
+then
+	omsg="$msg"
+	msg="TEST: $*"
+fi
+
 # Act on the results
 case $msg in
 	*OK*)
@@ -48,7 +55,7 @@ case $msg in
 		if [[ ! -f $warnfile ]]
 		then
 			# Mail the fyi address
-			echo -e "$HOSTNAME\n$msg" | mailx -s "$HOSTNAME disk warming!" $fyi
+			echo -e "$HOSTNAME\n$msg\n$omsg" | mailx -s "$HOSTNAME disk warming!" $fyi
 			# Log the warning
 			logger -p user.warn -t DISKCHECK "$msg"
 			# Touch the warnfile so it doesn't warn again until it's cleared (see above)
@@ -61,7 +68,7 @@ case $msg in
 		;;
 	*CRITICAL*)
 		# Mail the FYI and alert addresses
-		echo -e "$HOSTNAME\n$msg" | mailx -s "$HOSTNAME disk critical!" $alert
+		echo -e "$HOSTNAME\n$msg\n$omsg" | mailx -s "$HOSTNAME disk critical!" $alert
 		# Log the critical message
 		logger -p user.crit -t DISKCHECK "$msg"
 		# Shitcan the warnfile, no matter how old it is.

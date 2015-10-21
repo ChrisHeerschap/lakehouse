@@ -45,3 +45,8 @@ uptemp
 ======
 
 An actually functional but still ugly and primitive thermostat in bash.
+
+dht-collectd and dht.py
+=======================
+
+A python script (from Adafruit) to get temp and humidity from a DHT22 sensor, and a shell script to wrap that and call it for collectd.

@@ -1,0 +1,28 @@
+#!/bin/bash
+
+exec 2> /tmp/debug-w1influx
+set -x
+
+# Get current epoch timestamp
+now=$(date +%s)
+
+# My hostname
+host=${HOSTNAME:-$(hostname)}
+
+# Start in the w1 dir
+cd /sys/bus/w1/devices
+
+# Get a list of the temp sensors
+sensors=$(echo 28-*)
+
+# Check each one
+for sensor in $sensors
+do
+	# Temperature in millidegrees C
+	tmc=$(awk -F= '/t=/ {print $2}' $sensor/w1_slave)
+
+	# Temp in deg C
+	temp=${tmc:0:-3}.${tmc:0-3}
+
+	echo "environ.$host.temp.$sensor $temp $now" 
+done | nc graphite.db94.net 2003

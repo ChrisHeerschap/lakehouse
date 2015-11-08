@@ -1,7 +1,8 @@
 #!/bin/bash
 
-exec 2> /tmp/debug-diskcheck
-set -x
+# Uncomment these two lines to enable debugging output
+#exec 2> ~/tmp/debug-diskcheck
+#set -x
 
 # Super ghetto local disk checker
 # get alert address from the .monitor.cfg

@@ -50,3 +50,7 @@ diskcheck
 =========
 
 Small shell script that calls the nagios plugin check_disk to monitor disk usage.
+
+internet-monitor
+================
+Monitor ability to ping internet hosts (Google DNS) and reboot router if it fails consistently.

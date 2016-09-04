@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# The base station for the Ambient Weather WS-1400-IP weather station
+#  sometimes gets derpy and has a high ping RTT. This script monitors that
+#  in a nagios-compatible fashion.
+host=weather.lh.db94.net
+
+rtt=$(ping -c 4 $host 2> /dev/null | grep rtt | cut -f5 -d/)
+
+# Drop any decimals
+rtt=${rtt%.*}
+
+if [[ -z $rtt ]]
+then
+	echo "CRITICAL: No response to ping."
+	exit 2
+fi
+
+if (( rtt > 200 ))
+then
+	echo "CRITICAL: Over 200ms response."
+	exit 2
+fi
+
+if (( rtt > 100 ))
+then
+	echo "WARNING: Over 100ms response."
+	exit 1
+fi
+
+echo "OK: RTT is $rtt"
+exit 0

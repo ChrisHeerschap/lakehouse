@@ -1,0 +1,41 @@
+#!/bin/bash
+
+exec 2> /home/cmh/tmp/debug-collectd
+set -x
+
+if (( EUID ))
+then
+    #echo "Warning: needs root, re-exec via sudo..."
+    exec sudo $0 "$@"
+fi
+
+# Get a list of collectd CSV files from the WeatherStation which haven't been updated in two minutes
+collectdir=~cmh/collectd/lakepi/
+date=$(date +%Y-%m-%d)
+out=$(/usr/bin/find $collectdir -type f -mmin +2 -name \*-$date )
+
+# Check that output
+if [[ -n $out || ! -f $collectdir/collectd/ping-$date ]]
+then
+	# Notify and try to shut down collectd
+    msg="Found stale files:\n$out\n\nStopping collectd..."
+    /usr/sbin/service collectd stop
+    sleep 1
+
+	# Check to see if it's still running, apply big hammer if it is.
+	if [[ -n $( pgrep collectd ) ]]
+	then
+		msg="$msg\nRestart failed, collectd still running. Killing collectd."
+		/usr/bin/pkill -9 collectd
+	fi
+    sleep 1
+
+	
+	msg="$msg\nRestarting collectd."
+    /usr/sbin/service collectd restart
+    exit 1
+
+	# Send notification
+	echo -e "$msg" | mailx -s "LAKEPI: Restart collectd" db94wookie@gmail.com
+fi
+

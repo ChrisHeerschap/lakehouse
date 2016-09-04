@@ -11,12 +11,14 @@
 COMMAND="${0##*/}"
 
 # Debugging
-exec 2> ~/tmp/debug-$COMMAND.$$
+DEBUG=~/tmp/debug-$COMMAND
+rm -f $DEBUG
+exec 2> $DEBUG
 set -x
 
 # COMMANDS
 ip=/bin/ip
-awk=/usr/sbin/awk
+awk=/usr/bin/awk
 ssh=/usr/bin/ssh
 fping=/usr/bin/fping
 wall=/usr/bin/wall
@@ -33,7 +35,7 @@ function alert {
     # Echo to syslog
     $logger -p user.crit -t $COMMAND "$*"
 }
-    
+
 # error out if fping isn't found
 if [[ ! -x $fping ]]
 then
@@ -55,9 +57,7 @@ then
 fi
 
 # Find my router from the default route
-#router=$($ip route show | $awk '/default/ {print $3}')
-# ... or, hardcode it:
-router='192.168.113.1'
+router=$($ip route show | $awk '/default/ {print $3}')
 
 # Username for ssh connection to router
 routeruser='root'
@@ -73,6 +73,9 @@ external='8.8.8.8'
 if ! $fping -q $router
 then
     alert "ERROR: Can't ping the router, can't continue."
+    # Link this debug file to another name so it gets saved.
+    ln $DEBUG ${DEBUG}.$$
+    # Exit with error status
     exit 1
 fi
 
@@ -88,6 +91,11 @@ do
     # Wait a minute to try again
     sleep 60
 done
+
+# If we've gotten this far, we weren't able to ping externally.
+#  Something is likely wrong, and we would like to see the debugging file.
+#  Link this debug file to another name so it gets saved.
+ln $DEBUG ${DEBUG}.$$
 
 # If we get to this point, we couldn't ping external in three tries at minute intervals.
 # Reboot the router
@@ -115,6 +123,7 @@ do
             # Couldn't ping out, something's fucked up, nothing else we can do.
             : Failed to re-establish communication outside.
             alert "ERROR: couldn't get external after rebooting router!"
+            # Exit with error status
             exit 1
         fi
     fi

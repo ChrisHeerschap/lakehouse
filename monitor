@@ -4,7 +4,8 @@
 _DEBUG=1
 if [[ -n $_DEBUG ]]
 then
-	exec 2> /tmp/debug
+	PS4='$LINENO:	'
+	exec 2> ~/tmp/debug-${0##*/}
 	set -x
 fi
 
@@ -17,10 +18,18 @@ shopt -s extglob
 inifile="$HOME/.monitor.cfg"
 # Base dir
 dir='/home/cmh/www'
+# File to indicate that a warning has been issued
+warnfile=$dir/warning
+# File to make alerts STFU
+stfufile=$dir/stfu
+# Number of minutes to expire the warning file
+warnexpire=240
 # Set date vars
 eval $(/bin/date +"yr=%y mo=%m da=%d h24=%H h12=%I mi=%M pm=%p es=%s")
 # Drop the leading zero on the 12h hour value
 h12=${h12#0}
+# Round the epoch seconds to the latest minute
+es=$((es-(es%60)))
 # Storage directory
 stodir="$dir/storage/$yr/$mo/$da"
 # RRD dir
@@ -29,7 +38,7 @@ rrddir="$dir/../rrd"
 file="$stodir/$yr$mo$da-$h24$mi.jpg"
 # Filename for the most recent file
 now="$dir/now.jpg"
-# Times to start and stop taking photos
+# Default times to start and stop taking photos - overriden by suntimes below
 photostart=0600
 photostop=1800
 # Read the times from an external file if it exists
@@ -44,10 +53,6 @@ dark="$dir/images/toodark.jpg"
 nophoto="$dir/images/nophoto.jpg"
 # Swap out this image if no camera is detected
 nocamera="$dir/images/nocamera.jpg"
-# IP of the weather station
-weather='192.168.113.11'
-# URL of the live data page on the weather station
-url="http://${weather}/livedata.htm"
 # Output to this HTML page
 out="$dir/now.html"
 # Track temps in this csv (rotate daily)
@@ -73,6 +78,34 @@ else
 	echo "WARNING: ini file $inifile unreadable" >&2
 fi
 
+# If the "alert" address isn't set after reading the inifile,
+#  we can't send emails to anyone so will throw messages to whatever
+#  we can locally and hope they get seen.
+if [[ -z $alert ]]
+then
+	# alert address not set! Log some errors and hope they're seen
+	msg="$0 WARNING: No alert address set! Please set the variable \"alert\" in $inifile with a valid email address."
+	# Send to syslog
+	logger -t MONITOR -p user.crit "$msg"
+	# Send to all logged-in users and STDOUT
+	echo "$msg" | tee >( /usr/bin/wall )
+	# Send to STDERR
+	echo "$msg" >&2
+fi
+
+# Set the URL of the Ambient Weather weather station if the IP is set
+if [[ -n $weather ]]
+then
+	# URL of the live data page on the weather station
+	url="http://${weather}/livedata.htm"
+fi
+
+# If i've set "wustation" in my .monitor.cfg, set the URL of the WeatherUnderground page for this weather station
+if [[ -n $wustation ]]
+then
+	wunderurl="http://www.wunderground.com/personal-weather-station/dashboard?ID=$wustation"
+fi
+
 ##### FUNCTIONS DEFS #####
 function noise {
 	(( NOISE )) && echo "$*"
@@ -81,6 +114,7 @@ function noise {
 # Get my temperature from the DS18B20 1-wire sensor
 function mytemp {
 	# Read the current temp from the DS18B20 if it is attached
+	# Note: This code won't handle more than one sensor.
 	w1=$(ls /sys/bus/w1/devices/*/w1_slave)
 	if [[ -r $w1 ]]
 	then
@@ -94,7 +128,7 @@ function mytemp {
 }
 
 # Check if we're running from an interactive session
-if tty -s
+if /usr/bin/tty -s
 then
 	# Can be overridden with "-q" option below
 	NOISE=1
@@ -111,7 +145,7 @@ do
 		*)	# Any other option triggers usage
 			echo "Usage: $0 [ -q | -v ]"
 			echo "	-q	Run quietly"
-			echo "	-n	Run verbosely"
+			echo "	-v	Run verbosely"
 			echo
 			exit 1
 			;;
@@ -123,7 +157,7 @@ shift $((OPTIND-1))
 noise "Running in $dir"
 cd $dir
 
-# Make the storage dir
+# Make the storage dir (-p exits quietly if the dir exists)
 mkdir -p $stodir
 
 # Check to see if the onboard camera is connected
@@ -134,9 +168,9 @@ eval $( vcgencmd get_camera )
 if (( detected ))
 then
 	# Take a photo with the onboard camera if the time is between 6am and 6pm
-	#  NB: have to specify values as base 10 with "10#" prefix to avoid 08/09 being 
-	#      interpreted as bad octal values. Bash will interpret a number with a leading
-	#      zero as octal.
+	#  NB: have to specify values as base 10 with "10#" prefix to avoid 08/09 being
+	#	  interpreted as bad octal values. Bash will interpret a number with a leading
+	#	  zero as octal.
 	if (( 10#$h24$mi > 10#$photostart && 10#$h24$mi < 10#$photostop ))
 	then
 		noise "Taking photo with webcam"
@@ -187,13 +221,10 @@ noise "Getting temp/humidity info from weather station"
 for try in {1..3}
 do
 	# Get times before and after trying to connect to the weather station
-	before=$(date +%s)
+	before=$(/bin/date +%s)
 	eval $(curl -s $url | egrep "(in|out)(Temp|Humi)" | cut -f 4,14 -d'"' --output-delimiter='=')
 	exitstat=$?
-	after=$(date +%s)
-
-	# DEBUGGING: Update runtime and temps to debugging CSV
-	echo "${before},$((after-before)),${exitstat},${inTemp},${outTemp}" >> ~/tmp/monitor-debug.csv
+	after=$(/bin/date +%s)
 
 	# Exit the loop if we have a valid reading for inTemp
 	if [[ $inTemp == +([0-9]).[0-9] ]]
@@ -203,8 +234,11 @@ do
 		# We don't have a valid inTemp reading. Alert on that.
 		# Check to see if it's alive
 		fping -q $weather && wstat='alive' || wstat='dead'
+		# Generate the error message to email
+		msg="Null value for inTemp, try $try in $((after-before)) seconds - $weather is $wstat"
+		msg="$msg\n${before},$((after-before)),${exitstat},${inTemp},${outTemp}"
 		# Mail this line to the first address in alert.
-		echo "Null value for inTemp, try $try in $((after-before)) seconds - $weather is $wstat" | mail -s 'LakePi temp error' ${alert%%,*}
+		echo -e "$msg" | mail -s 'LakePi temp error' ${alert%%,*}
 	fi
 done
 
@@ -218,32 +252,62 @@ then
 	refTemp=${refTemp%??}
 fi
 
-# Alert if it's too cold
+# Alert to everyone if it drops below the "lowtemp" setting
 if (( ${refTemp%%.*} < lowtemp ))
 then
 	# Set table background to red to indicate alert
 	inBkg='#ffcccc'
-	# Send an alert if it's set
-	if [[ -n $alert ]]
+	# Send an alert on the low temp condition
+	noise "Alerting on low temp condition ($inTemp)"
+	if [[ ! -f $stfufile ]]
 	then
-		# Send an alert on the low temp condition
-		noise "Alerting on low temp condition ($inTemp)"
-		echo "ALERT: Inside temp is $refTemp!" | mail -s "ALERT: Lakehouse temp" $alert
-	else
-		# alert address not set! Log some errors and hope they're seen
-		msg="WARNING: No alert address set and current temp: $refTemp"
-		logger -t MONITOR -p user.crit "$msg"
-		echo "$msg" >&2
+		echo "ALERT: Inside temp is $refTemp!\nLast warning:\n$(< $warnfile)" | mail -s "ALERT: Lakehouse temp" $alert
 	fi
+# Alert to the first mail address if it's below "warntemp"
+#  use a warning file to not warn incessantly
 elif (( ${refTemp%.*} < warntemp ))
 then
 	# Set table background to orange to indicate warning
 	inBkg='#ffcc99'
+	# If there's no warnfile, create it and send a warning
+	if [[ ! -f $warnfile ]]
+	then
+		# Send a warning on the low temp condition to the first email in "alert"
+		noise "Warning on low temp condition ($inTemp)"
+		# Create the warning file
+		echo "$yr$mo$da-$h24$mi warning temp: $refTemp under $warntemp - critical $lowtemp" > $warnfile
+		# Set a warning message (sent below)
+		msg="WARNING: Inside temp is $refTemp!\n$(< $warnfile)"
+	elif [[ -n $(/usr/bin/find $warnfile -mmin +$warnexpire) ]]
+	then
+		# Update the time on the warning file
+		touch $warnfile
+		# Set a warning message (sent below)
+		msg="WARNING: Inside temp is $refTemp!\n$(< $warnfile)"
+	fi
+
+	# If a warning message has been set, send it.
+	if [[ -n $msg ]]
+	then
+		echo -e "$msg" | mail -s "Lakehouse temp warning" ${alert%%,*}
+	fi
+# Clean up if we're in an ok condition
+else
+	# Temperature is okay
+	# Remove the STFU file
+	/bin/rm -f $stfufile
+	# If the warnfile exists, clear it and send a recovery email
+	if [[ -f $warnfile ]]
+	then
+		echo -e "RECOVERED: Temperature is now $refTemp, above $warntemp\nLast warning: $(< $warnfile)" | mail -s "Lakehouse temp warning" ${alert%%,*}
+		rm $warnfile
+	fi
 fi
 
 # Tag the background if it's under freezing outside
 if (( ${outTemp%.*} < 32 ))
 then
+	# This is orange
 	outBkg='#ffcc99'
 fi
 
@@ -269,32 +333,40 @@ fi
 # Update the RRD files and graphs
 for rrd in inTemp outTemp cpuTemp myTemp
 do
+	# Get the value
+	value=$(eval echo \$$rrd)
+
 	# Don't update if the value is null.
-	if [[ -z $(eval echo \$$rrd) ]]
+	if [[ -z $value ]]
 	then
 		noise "Null value for $rrd - skipping the update"
 		continue
 	fi
 
 	# Update the RRD file
-	noise "Updating the RRD graph $rrd"
-	/usr/bin/rrdtool update $rrddir/${rrd}.rrd $es:$(eval echo \$$rrd)
-	# Regenerate the graphs - disabled as I'm not currently using them
-	#/usr/bin/rrdtool graph $dir/${rrd}.png DEF:temp=$rrddir/${rrd}.rrd:${rrd}:AVERAGE LINE2:temp#00FF00 > /dev/null
+	noise "Updating the RRD graph $rrd with value $value"
+	if /usr/bin/rrdtool updatev $rrddir/${rrd}.rrd $es:$value >&2
+	then
+		: RRD Updated $rrd with value $value okay - $es
+	else
+		: RRD FAILED TO UPDATE - $es
+	fi
 done
 
 # One graph to graph them all
-#  * Inside temp from weatherstation in green
+#  * Inside temp from weatherstation in dark blue
 #  * Outside temp from weatherstation in black
 #  * Inside temp from Pi sensor in blue
-#  * Dashed horizontal line at freezing in cyan
-#  * Dashed horizontal line at the low temp alert point in orange
+#  * Horizontal line at freezing in cyan
+#  * Dashed horizontal line at the low temp warning point in orange
+#  * Dashed horizontal line at the low temp critical point in red
 /usr/bin/rrdtool graph $dir/tempGraph.png -w 640 -h 320 -D \
-	"DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE" "LINE4:inTemp#00FF00:Inside" \
-	"DEF:outTemp=$rrddir/outTemp.rrd:outTemp:AVERAGE" "LINE2:outTemp#000000:outside" \
-	"DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE" "LINE2:myTemp#0000FF:Pi temp" \
-	"HRULE:$warntemp#FF9900:Low warning:dashes" \
-	"HRULE:$lowtemp#FF0000:Low alert:dashes" \
+	"DEF:myTemp=$rrddir/myTemp.rrd:myTemp:AVERAGE" "LINE4:myTemp#0000FF:Inside" \
+	"DEF:inTemp=$rrddir/inTemp.rrd:inTemp:AVERAGE" "LINE2:inTemp#9999FF:Mantel" \
+	"DEF:outTemp=$rrddir/outTemp.rrd:outTemp:AVERAGE" "LINE4:outTemp#000000:Outside" \
+	"DEF:heat=$rrddir/heat.rrd:heat:MAX" "TICK:heat#FF333366:1:Heat" \
+	"HRULE:$warntemp#FF9900:Warning:dashes" \
+	"HRULE:$lowtemp#FF0000:Alert:dashes" \
 	"HRULE:32#00FFFF:Freezing" > /dev/null
 
 
@@ -303,29 +375,22 @@ noise "Updating HTML file"
 cat << EOF > $out
 <HEAD>
 <meta http-equiv="refresh" content="300">
-<TITLE>Monitor</TITLE>
+<TITLE>Lakehouse monitor</TITLE>
 </HEAD>
 <BODY>
-<TABLE CELLPADDING=10>
-  <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><H1>Webcam</H1></TD></TR> -->
-  <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR>
-       <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=mousecam.jpg></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=$inBkg><FONT SIZE=+10>$refTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
-  <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${inHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=$outBkg><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Last run</TD><TH BGCOLOR=$timeBkg><FONT SIZE=+10>$h12:$mi</TH><TD><FONT SIZE=+7>$pm</TD></TR>
-  <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside humidity</TD><TH BGCOLOR=#FFCCCC><FONT SIZE=+10>${outHumi}.0</TH><TD><FONT SIZE=+7>%</TD></TR> -->
-  <!-- <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Temp last updated: $mo/$da/$yr $h12:$mi $pm</TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Temperature trends:<BR><IMG SRC=tempGraph.png></TD></TR>
-  <!-- <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Inside temperature:<BR><IMG SRC=inTemp.png></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Outside temperature:<BR><IMG SRC=outTemp.png></TD></TR> -->
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>More weather info/history available on <A HREF=http://www.wunderground.com/personal-weather-station/dashboard?ID=KPAPAUPA2 TARGET="_blank">Wunderground</A></TD></TR>
-<TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
+<TABLE CELLPADDING=3>
+  <!-- NO PHOTO FROM THIS PI <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=now.jpg></TD></TR> -->
+  <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3><IMG SRC=lake.jpg></TD></TR>
+  <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=$inBkg><FONT SIZE=+10>$refTemp</TH><TD WIDTH=100><FONT SIZE=+7>F</TD></TR>
+  <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=$outBkg><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
+  <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Temperature trends over the past 24 hours:<BR><A HREF=$wunderurl TARGET="_blank"><IMG SRC=tempGraph.png></A><BR>
+  <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Last run $h12:$mi $pm</TD></TR>
 </TD></TR></TABLE>
 </BODY>
 EOF
 
+# Holding area for lines we don't want to run at the moment:
+#  <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Photo last updated: $(/bin/date -d @$(stat -c %Y $now) +"%m/%d/%y %l:%M %P")</TD></TR>
 
 ##### END #####
 noise "	...completed successfully!"

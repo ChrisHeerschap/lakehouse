@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# This was an early way to log temps using the 1-Wire sensors.
+
 # debugging
 if [[ -n $_DEBUG ]]
 then

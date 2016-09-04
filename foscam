@@ -1,0 +1,247 @@
+#!/bin/bash
+
+# control the foscam 8910
+#
+# Camera control notes:
+#
+# Reference:
+#  http://www.foscam.es/descarga/ipcam_cgi_sdk.pdf
+
+# General usage
+usage() {
+    echo "usage: $0 [-c {camera}] [-p {port}] [-u {user}] [-P {password}] [ -v | -q ] commands..."
+    echo
+    echo "  -c  Specify the IP address or hostname of the camera"
+    echo "      (without http prefix)"
+    echo "  -p  Specify the TCP port used by the camera"
+    echo "  -u  Specify the username"
+    echo "  -P  Specify the password"
+    echo "      (It's more secure to set the password in the environment var FOSCAM_PASS)"
+    echo "  -q  Quiet output"
+    echo "      (Default for non-interactive sessions)"
+    echo "  -v  Verbose output"
+    echo "      (Default for interactive sessions)"
+}
+
+# Error message
+error() {
+    # Print an error message if any args are passed
+    if [[ -n "$*" ]]
+    then
+        echo "ERROR: $*" >&2
+        echo >&2
+    fi
+
+    # Exit with non-zero status
+    exit 1
+}
+
+# Output
+noise() {
+    # Only output the args if NOISE is set to 1
+    (( NOISE )) && echo "$*"
+}
+
+# Set default values
+#  Can be overridden by exporting environment vars in parent shell
+#  Either is overridden by command line options
+FOSCAM_PORT="${FOSCAM_PORT:-80}"
+FOSCAM_CONFIG=${FOSCAM_CONFIG:-$HOME/.foscam}
+# If the config file is readable, source it.
+if [[ -r $FOSCAM_CONFIG ]]
+then
+    . $FOSCAM_CONFIG
+else
+    noise "Warning: can't read foscam config file $FOSCAM_CONFIG"
+fi
+
+# Noisy output if we have an interactive terminal
+#  Can be overridden with command-line "-q" and "-v" options
+if /usr/bin/tty -s
+then
+    NOISE=1
+else
+    NOISE=0
+fi
+
+# Command line options processing
+while getopts ":c:p:u:P:qv" opt
+do
+    case $opt in
+        c)  FOSCAM="$OPTARG";;
+        p)  FOSCAM_PORT="$OPTARG";;
+        u)  FOSCAM_USER="$OPTARG";;
+        P)  FOSCAM_PASS="$OPTARG";;
+        v)  NOISE=1;;
+        q)  NOISE=0;;
+        *)  usage;;
+    esac
+done
+shift $((OPTIND-1))
+
+# Error checking to make sure the necessary params are set
+if [[ -z $FOSCAM ]]
+then
+    error "Foscam address not set. Please set with \"FOSCAM\" var or -c option."
+fi
+if [[ -z $FOSCAM_USER ]]
+then
+    error "Foscam user not set. Please set with \"FOSCAM_USER\" var or -u option."
+fi
+if [[ -z $FOSCAM_PASS ]]
+then
+    error "Foscam password not set. Please set with \"FOSCAM_PASS\" var or -P option."
+fi
+
+# Function to send the commands to the foscam
+foscam_send() {
+    base="http://$FOSCAM:$FOSCAM_PORT/"
+    auth="user=$FOSCAM_USER&pwd=$FOSCAM_PASS"
+    case $1 in
+        decoder*|command)
+            url="${base}decoder_control.cgi?${auth}&command=$2"
+            out=$(/usr/bin/curl -sm 10 $url)
+            ;;
+        photo|snap*)
+            url="${base}snapshot.cgi?${auth}"
+            case $2 in
+                -) 
+                    # Send image to stdout
+                    /usr/bin/curl -sm 10 $url
+                    ;;
+                *%*)
+                    # Convert image date coding
+                    /usr/bin/curl -sm 10 $url > $(/bin/date +$2)
+                    ;;
+                *)
+                    # Just save the image
+                    /usr/bin/curl -sm 10 $url > $2
+                    ;;
+            esac
+            ;;
+        get_params)
+            url="${base}get_params.cgi?${auth}"
+            /usr/bin/curl -sm 10 $url
+            ;;
+        get_misc)
+            url="${base}get_misc.cgi?${auth}"
+            /usr/bin/curl -sm 10 $url
+            ;;
+        set_misc)
+			shift
+            url="${base}set_misc.cgi?${auth}&$*"
+            /usr/bin/curl -sm 10 $url
+            ;;
+    esac
+}
+
+# Error out if no args given
+if [[ $# == 0 ]]
+then
+    usage
+    error "No arguments given, nothing to do!"
+fi
+
+# Step through the command line options
+while (( ${#*} > 0 ))
+do
+    case $1 in
+        light|led|ir)
+            if [[ $2 == on ]]
+            then
+                noise "Sending command to turn IR light on"
+                foscam_send 'command' '95'
+            elif [[ $2 == off ]]
+            then
+                noise "Sending command to turn IR light off"
+                foscam_send 'command' '94'
+            else
+                error "arg to $1 should be either \"on\" or \"off\""
+            fi
+            shift 2
+            ;;
+        preset)
+            if [[ $2 == [1-8] ]]
+            then
+                # The command to call up a preset:
+                #  Pre  Cmd
+                #  1    31
+                #  2    33
+                #  3    35
+                #  4    37
+                #  ...
+                noise "Sending command to select preset $2"
+                foscam_send 'command' "$(( $2 * 2 + 29 ))"
+            else
+                error "arg to $1 should be a preset from 1 to 8"
+            fi
+            shift 2
+            ;;
+        sleep|wait)
+            if [[ $2 =~ [0-9]+ ]]
+            then
+                noise "Waiting $2 seconds..."
+                sleep $2
+            else
+                error "arg to $1 should be a time to sleep in seconds"
+            fi
+            shift 2
+            ;;
+        snap*|picture|grab)
+            if [[ -n $2 ]]
+            then
+                foscam_send 'snapshot' "$2"
+            else
+                error "arg to $1 should be a filename to save"
+            fi
+            shift 2
+            ;;
+        command)
+            if [[ $2 =~ [0-9]+ ]]
+            then
+                noise "Sending command $2"
+                foscam_send command "$2"
+            else
+                error "arg to $1 should be a command number"
+            fi
+            shift 2
+            ;;
+        center)
+            foscam_send command 25
+            shift
+            ;;
+        get*param)
+            noise "Getting camera parameters"
+            foscam_send get_params
+            shift
+            ;;
+        get*misc)
+            noise "Getting misc parameters"
+            foscam_send get_misc
+            shift
+            ;;
+        set*misc)
+            noise "Setting misc parameters: $2"
+            foscam_send set_misc $2
+            shift 2
+            ;;
+		autocenter)
+			noise "Turning on auto-centering on startup"
+			foscam_send set_misc ptz_center_onstart=1
+			shift
+			;;
+		noautocenter)
+			noise "Turning off auto-centering on startup"
+			foscam_send set_misc ptz_center_onstart=0
+			shift
+			;;
+        usage)
+            usage
+            exit 0
+            ;;
+        *)
+            error "Unknown command: \"$1\""
+            ;;
+    esac
+done
+

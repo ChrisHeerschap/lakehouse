@@ -3,6 +3,8 @@
 # Create an RRD file
 #
 # Started life here: http://lazydroid.com/2013/05/raspberry-pi-monitoring-cpu-temperature-with-rrdtool/
+#  It's pretty damn ugly and comes from me expending a complete minimum of effort in understanding rrd stuff.
+#  I run Graphite at home and that's way better but this gives me basic graphs at the remote location.
 
 # Current timestamp in seconds since epoch
 now=$(date +%s)
@@ -36,14 +38,20 @@ then
 	#  RRA:AVERAGE:0.5:525600:3200	525600 steps
 	# If you're creating an RRD to include past history, use the following:
 	# --start 1422069844 \
-	/usr/bin/rrdtool create ${rrd}.rrd \
-		DS:${rrd}:GAUGE:1200:U:U \
-		RRA:AVERAGE:0.5:1:3200 \
-		RRA:AVERAGE:0.5:6:3200 \
-		RRA:AVERAGE:0.5:36:3200 \
-		RRA:AVERAGE:0.5:144:3200 \
-		RRA:AVERAGE:0.5:1008:3200 \
-		RRA:AVERAGE:0.5:4320:3200 \
-		RRA:AVERAGE:0.5:52560:3200 \
-		RRA:AVERAGE:0.5:525600:3200
+	# This turns out to be completely shitty, don't do it.
+	#/usr/bin/rrdtool create ${rrd}.rrd \
+	#	DS:${rrd}:GAUGE:1200:U:U \
+	#	RRA:AVERAGE:0.5:1:3200 \
+	#	RRA:AVERAGE:0.5:6:3200 \
+	#	RRA:AVERAGE:0.5:36:3200 \
+	#	RRA:AVERAGE:0.5:144:3200 \
+	#	RRA:AVERAGE:0.5:1008:3200 \
+	#	RRA:AVERAGE:0.5:4320:3200 \
+	#	RRA:AVERAGE:0.5:52560:3200 \
+	#	RRA:AVERAGE:0.5:525600:3200
+	echo "5 minute resolution, 1 year retention"
+	echo "/usr/bin/rrdtool create ${rrd}.rrd --start 1420088400 --step 300 DS:${rrd}:GAUGE:300:0:200 RRA:AVERAGE:0.5:1:105408"
+
+	echo "1 minute resolution, 1 year retention, 0-200 range"
+	echo "/usr/bin/rrdtool create ${rrd}.rrd --start 1420088400 --step 60 DS:${rrd}:GAUGE:60:0:200 RRA:AVERAGE:0.5:1:527040"
 fi

@@ -1,5 +1,11 @@
 #!/bin/bash
 
+NOISE=0
+if tty -s
+then
+	NOISE=1
+fi
+
 # The base station for the Ambient Weather WS-1400-IP weather station
 #  sometimes gets derpy and has a high ping RTT. This script monitors that
 #  in a nagios-compatible fashion.
@@ -18,7 +24,9 @@ fi
 
 if (( rtt > 200 ))
 then
-	echo "CRITICAL: Over 200ms response."
+	echo "CRITICAL: Over 200ms response. Rebooting."
+	# Shit's gotten derpy... Reboot it.
+	curl -s http://${host}/msgreboot.htm > /dev/null
 	exit 2
 fi
 
@@ -28,5 +36,5 @@ then
 	exit 1
 fi
 
-echo "OK: RTT is $rtt"
+(( NOISE )) && echo "OK: RTT is $rtt"
 exit 0

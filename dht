@@ -32,19 +32,24 @@ sensor = Adafruit_DHT.DHT22
 if len(sys.argv) == 2:
 	pin = sys.argv[1]
 else:
-	print 'usage: sudo ./dht.py {pin number}'
-	sys.exit(1)
+	# Default to pin 17 if no arg1 is given
+	pin = 17
+	# Previously errored out in that condition
+	#print 'usage: dht {pin number}'
+	#sys.exit(1)
 
 # Try to grab a sensor reading.  Use the read_retry method which will retry up
 # to 15 times to get a sensor reading (waiting 2 seconds between each retry).
-humidity, temperature = Adafruit_DHT.read_retry(sensor, pin)
+humidity, tempc = Adafruit_DHT.read_retry(sensor, pin)
+# Get the farenheit temp
+tempf = 9.0/5.0 * tempc + 32
 
 # Note that sometimes you won't get a reading and
 # the results will be null (because Linux can't
 # guarantee the timing of calls to read the sensor).  
-# If this happens - output values of "U" which collectd will report as "unknown"
-if humidity is not None and temperature is not None:
-	print 'temp={0:0.1f}\nhumi={1:0.1f}'.format(temperature, humidity)
+if humidity is not None and tempc is not None:
+	print 'myTemp={0:0.1f}\nmyHumi={1:0.1f}\nmyTempC={2:0.1f}'.format(tempf, humidity, tempc)
 else:
-	print 'temp=U\nhumi=U'
+	# Not using this with collectd, no need to output anything
+	#print 'myTemp=U\nmyHumi=U\nmyTempC=U'
 	sys.exit(1)

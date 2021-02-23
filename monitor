@@ -16,6 +16,8 @@ shopt -s extglob
 ##### VAR DEFS #####
 # Use this file for var defs which override these defaults
 inifile="$HOME/.monitor.cfg"
+# Script to send messages to slack
+slack=~/bin/slack
 # Base dir
 dir='/home/cmh/www'
 # File to indicate that a warning has been issued
@@ -87,6 +89,8 @@ then
 	msg="$0 WARNING: No alert address set! Please set the variable \"alert\" in $inifile with a valid email address."
 	# Send to syslog
 	logger -t MONITOR -p user.crit "$msg"
+	# Send to slack
+	$slack -c 'Lake house' -i house 'WARNING: No alert adress set for lakehouse monitor'
 	# Send to all logged-in users and STDOUT
 	echo "$msg" | tee >( /usr/bin/wall )
 	# Send to STDERR
@@ -112,7 +116,7 @@ function noise {
 }
 
 # Get my temperature from the DS18B20 1-wire sensor
-function mytemp {
+function mytemp-ds {
 	# Read the current temp from the DS18B20 if it is attached
 	# Note: This code won't handle more than one sensor.
 	w1=$(ls /sys/bus/w1/devices/*/w1_slave)
@@ -125,6 +129,12 @@ function mytemp {
 		# Convert to deg F
 		myTemp=${myTemp:0:-3}.${myTemp:0-3}
 	fi
+}
+
+# Get my temperature from the DHT sensor
+function mytemp-dht {
+	# Read the current temp from the DHT22 sensor on pin 17
+	eval $(~/bin/dht 17)
 }
 
 # Check if we're running from an interactive session
@@ -209,8 +219,8 @@ else
 	fi
 fi
 
-# Get the temp from my DS18B20 temp sensor (if attached)
-mytemp
+# Get the temp from the attached sensor
+mytemp-ds
 
 # Get the temps from the weather station
 #  * Grab the live data page
@@ -222,7 +232,7 @@ for try in {1..3}
 do
 	# Get times before and after trying to connect to the weather station
 	before=$(/bin/date +%s)
-	eval $(curl -s $url | egrep "(in|out)(Temp|Humi)" | cut -f 4,14 -d'"' --output-delimiter='=')
+	eval $(curl -s $url | egrep "(in|out)(Temp|Humi|BattSta)" | sed 's/^.*name="//; s/".*value=/=/; s/" .*$/"/')
 	exitstat=$?
 	after=$(/bin/date +%s)
 
@@ -230,15 +240,6 @@ do
 	if [[ $inTemp == +([0-9]).[0-9] ]]
 	then
 		break
-	else
-		# We don't have a valid inTemp reading. Alert on that.
-		# Check to see if it's alive
-		fping -q $weather && wstat='alive' || wstat='dead'
-		# Generate the error message to email
-		msg="Null value for inTemp, try $try in $((after-before)) seconds - $weather is $wstat"
-		msg="$msg\n${before},$((after-before)),${exitstat},${inTemp},${outTemp}"
-		# Mail this line to the first address in alert.
-		echo -e "$msg" | mail -s 'LakePi temp error' ${alert%%,*}
 	fi
 done
 
@@ -261,7 +262,8 @@ then
 	noise "Alerting on low temp condition ($inTemp)"
 	if [[ ! -f $stfufile ]]
 	then
-		echo "ALERT: Inside temp is $refTemp!\nLast warning:\n$(< $warnfile)" | mail -s "ALERT: Lakehouse temp" $alert
+		echo -e "ALERT: Inside temp is $refTemp!\nLast warning:\n$(< $warnfile)" | mail -s "ALERT: Lakehouse temp" $alert
+		$slack -u 'Lake house' -i 'cold-face' "ALERT: Inside temp is $refTemp!\nLast warning:\n$(< $warnfile)"
 	fi
 # Alert to the first mail address if it's below "warntemp"
 #  use a warning file to not warn incessantly
@@ -290,6 +292,7 @@ then
 	if [[ -n $msg ]]
 	then
 		echo -e "$msg" | mail -s "Lakehouse temp warning" ${alert%%,*}
+		$slack -u 'Lake house' -i 'wrong' ":snowflake: *WARNING:* Lake house temp warning\n$msg"
 	fi
 # Clean up if we're in an ok condition
 else
@@ -313,7 +316,7 @@ fi
 
 # Log the values to the csv file
 noise "Updating data points to CSV file $csv"
-echo "$es,$inTemp,$inHumi,$outTemp,$outHumi${myTemp:+,}$myTemp" >> $csv
+echo "$es,$inTemp,$inHumi,$outTemp,$outHumi${myTemp:+,$myTemp}${myHumi:+,$myHumi}" >> $csv
 
 # Get the CPU temp
 cpuTempC=$(< /sys/class/thermal/thermal_zone0/temp)
@@ -331,7 +334,7 @@ then
 fi
 
 # Update the RRD files and graphs
-for rrd in inTemp outTemp cpuTemp myTemp
+for rrd in inTemp outTemp cpuTemp myTemp myHumi
 do
 	# Get the value
 	value=$(eval echo \$$rrd)
@@ -369,6 +372,11 @@ done
 	"HRULE:$lowtemp#FF0000:Alert:dashes" \
 	"HRULE:32#00FFFF:Freezing" > /dev/null
 
+# Check battery status on the weather station
+if [[ $inBattSta != 'Normal' || $outBattSta1 != 'Normal' ]]
+then
+	battwarn="<TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3 BGCOLOR=#ffcccc>Warning! Inside battery status: $inBattSta Outside battery status: ${outBattSta1}</TD></TR>"
+fi
 
 # Write the HTML status file
 noise "Updating HTML file"
@@ -384,7 +392,8 @@ cat << EOF > $out
   <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Inside temp</TD><TH BGCOLOR=$inBkg><FONT SIZE=+10>$refTemp</TH><TD WIDTH=100><FONT SIZE=+7>F</TD></TR>
   <TR VALIGN=CENTER><TD ALIGN=RIGHT><FONT SIZE=+10>Outside temp</TD><TH BGCOLOR=$outBkg><FONT SIZE=+10>$outTemp</TH><TD><FONT SIZE=+7>F</TD></TR>
   <TR VALIGN=CENTER><TD ALIGN=CENTER COLSPAN=3>Temperature trends over the past 24 hours:<BR><A HREF=$wunderurl TARGET="_blank"><IMG SRC=tempGraph.png></A><BR>
-  <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Last run $h12:$mi $pm</TD></TR>
+  <TR VALIGN=CENTER><TD ALIGN=RIGHT COLSPAN=3>Oil tank: $(~/bin/get-tanklevel) - Last run $h12:$mi $pm</TD></TR>
+  $battwarn
 </TD></TR></TABLE>
 </BODY>
 EOF

@@ -16,25 +16,30 @@ rtt=$(ping -c 4 $host 2> /dev/null | grep rtt | cut -f5 -d/)
 # Drop any decimals
 rtt=${rtt%.*}
 
+message() {
+	ES=$1
+	shift
+	(( NOISE )) && echo "$*" && echo "Exit status: $ES"
+	echo "$*" | mail -s "Lakehouse weather ping" db94wookie@gmail.com
+	exit $ES
+}
+
 if [[ -z $rtt ]]
 then
-	echo "CRITICAL: No response to ping."
-	exit 2
+	message 2 "CRITICAL: No response to ping."
 fi
 
 if (( rtt > 200 ))
 then
-	echo "CRITICAL: Over 200ms response. Rebooting."
 	# Shit's gotten derpy... Reboot it.
 	curl -s http://${host}/msgreboot.htm > /dev/null
-	exit 2
+	#message 2 "CRITICAL: $rtt is over 200ms threshold. Rebooting."
 fi
 
-if (( rtt > 100 ))
-then
-	echo "WARNING: Over 100ms response."
-	exit 1
-fi
+#if (( rtt > 100 ))
+#then
+#	message 1 "WARNING: Over 100ms response."
+#fi
 
 (( NOISE )) && echo "OK: RTT is $rtt"
 exit 0

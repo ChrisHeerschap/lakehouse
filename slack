@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# Set defaults
+channel='#alerts'
+username='Ashbot'
+icon=':rageguy:'
+# File that contains the webhook URL
+urlfile='.slack-webhook-url'
+
+# Usage function
+usage() {
+    echo "Usage: $0 [ -c channel ] [ -u username ] [ -i icon ]"
+    echo "          [ -U webhook url ] [ -h ] {message}"
+    echo -e "\nOptions:"
+    echo "  -c  Specify which channel should receive the message"
+    echo "  -u  Specify the username to display (not auth)"
+    echo "  -i  Specify the icon to use"
+    echo "  -U  Specify the webhook URL"
+    echo "  -h  This usage message"
+    exit ${1:-0}
+}
+
+# Options for overrides
+while getopts ":c:u:i:U:h" opt
+do
+    case $opt in
+        c) # Channel in which to post
+           channel="$OPTARG";;
+        u) # What username to use when posting
+           username="$OPTARG";;
+        i) # What icon to use for the post
+           if [[ $OPTARG != :*:  ]]
+           then
+               icon=":${OPTARG}:"
+           else
+               icon="${OPTARG}"
+           fi
+           ;;
+        U) # Use a different slack webhook
+           url="$OPTARG";;
+        h) # Display the usage help
+           usage;;
+    esac
+done
+shift $((OPTIND-1))
+
+# URL not specified via options, so let's look for it
+if [[ -z $url ]]
+then
+    # Search for the webhook file in
+    #  * current directory,
+    #  * homedirectory,
+    #  * SUDO_USER's home directory
+    #  * one level up from this script's directory
+    for location in ./${urlfile} ${HOME}/${urlfile} ${SUDO_USER:+$(eval echo ~${SUDO_USER}/${urlfile})} ${0%/*}/../${urlfile}
+    do
+        if [[ -r $location ]]
+        then
+            url="$(< ${location})"
+            break
+        fi
+    done
+fi
+
+# If it's still not set, we can't proceed.
+if [[ -z $url ]]
+then
+    echo "ERROR: Can't find webhook URL file \"$urlfile\""
+    exit 1
+fi
+
+if ! out=$(curl -s -X POST --data-urlencode "payload={\"channel\": \"${channel}\", \"username\": \"${username}\", \"text\": \"${icon} ${*}\", \"icon_emoji\": \"${icon}\"}" ${url})
+then
+    echo -e "Failed:\n$out"
+    exit 1
+fi

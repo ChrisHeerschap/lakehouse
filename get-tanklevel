@@ -1,0 +1,26 @@
+#!/bin/bash
+
+PS4='$LINENO:$SECONDS >>> '
+exec 2> /home/cmh/tmp/debug-get-tanklevel
+set -x
+
+rmt=piz
+ruser=cmh
+key=~cmh/.ssh/lake-backups
+dir=~/collectd/lake/oiltank/
+file=$dir/level-$(date +%Y-%m-%d.csv)
+max=1150
+
+val=$(ssh -i $key $ruser@$rmt "tail -1 $file | cut -f2 -d,")
+
+if [[ $val =~ [0-9]* ]]
+then
+	if (( val == 300 ))
+	then
+		echo "Full (>73%)"
+	else
+		echo "$(( ( max - val ) * 100 / max ))%"
+	fi
+else
+	echo "N/A"
+fi

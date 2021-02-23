@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Originally from: https://gist.github.com/t6/e48455f6ceed088ad619
+
+# Debugging
+exec 2> ~/tmp/debug-ncdns
+set -x
+
+set -eu
+#FETCH="fetch -qo -"
+FETCH="curl -s"
+now=$(date +%y%m%d-%H%M)
+
+# Set the vars
+domain='db94.net'
+host='lakehouse'
+password='de681f9f40d542988c722021c4f91294'
+
+# External IP
+extip=$(curl -s ifconfig.co)
+mydnsip=$(dig +short $host.$domain)
+
+# If the external IP doesn't match the IP of the DNS name, set it.
+if [[ $extip != $mydnsip ]]
+then
+	# Set the hostname
+	out="$(${FETCH} "https://dynamicdns.park-your-domain.com/update?host=${host}&domain=${domain}&password=${password}")"
+
+	# Check for success
+	if echo "${out}" | grep -q "<ErrCount>0</ErrCount>"
+	then
+			echo "$now SUCCESS" >> ~/tmp/log-ncdns
+			exit 0
+	else
+			echo "$now ERROR ${out}" >> ~/tmp/log-ncdns
+			exit 1
+	fi
+fi

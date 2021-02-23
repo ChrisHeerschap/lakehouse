@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # debugging
-#exec 2> debug-suntimes
-#set -x 
+exec 2> tmp/debug-suntimes
+set -x
 
 # url
 url='http://api.sunrise-sunset.org/json'

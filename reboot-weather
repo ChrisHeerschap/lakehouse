@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Quick and dirty way to reboot the weather station
+host=weather.lh.db94.net
+curl -s http://${host}/msgreboot.htm > /dev/null

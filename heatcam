@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Use this to disable the heat cam
+#exit 0
+
 exec 2> ~/tmp/debug-heatcam
 PS4='$LINENO:$SECONDS:  '
 set -x
@@ -37,6 +40,9 @@ do
     [[ -n $value ]] && break
 done
 
+# Temporary while the lake webcam is offline
+cp $outfile ~/www/lake.jpg
+
 # Drop the decimal from the value (with a dark range of 0-2000, decimal values are just noise)
 value=${value%.*}
 
@@ -66,15 +72,15 @@ else
 fi
 
 # Build the graphite line
-msg="servers.lakepi.heat.camera $value $now"
+msg="servers.lake.heat.camera $value $now"
 
 # Add the binary value line if it's set
 if [[ -n $binval ]]
 then
-    msg="$msg\nservers.lakepi.heat.value $binval $now"
+    msg="$msg\nservers.lake.heat.value $binval $now"
 	# Update the RRD graph
 	/usr/bin/rrdtool update /home/cmh/rrd/heat.rrd $now:$binval
 fi
 
 # Log it locally and to graphite
-echo -e "$msg" | tee -a $out | nc -w 10 lakepi 2003
+echo -e "$msg" | tee -a $out | nc -N -w 10 lakepi 2003

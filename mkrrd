@@ -50,8 +50,8 @@ then
 	#	RRA:AVERAGE:0.5:52560:3200 \
 	#	RRA:AVERAGE:0.5:525600:3200
 	echo "5 minute resolution, 1 year retention"
-	echo "/usr/bin/rrdtool create ${rrd}.rrd --start 1420088400 --step 300 DS:${rrd}:GAUGE:300:0:200 RRA:AVERAGE:0.5:1:105408"
+	echo "/usr/bin/rrdtool create ${rrd}.rrd --start $(date +%s) --step 300 DS:${rrd}:GAUGE:300:0:200 RRA:AVERAGE:0.5:1:105408"
 
 	echo "1 minute resolution, 1 year retention, 0-200 range"
-	echo "/usr/bin/rrdtool create ${rrd}.rrd --start 1420088400 --step 60 DS:${rrd}:GAUGE:60:0:200 RRA:AVERAGE:0.5:1:527040"
+	echo "/usr/bin/rrdtool create ${rrd}.rrd --start $(date +%s) --step 60 DS:${rrd}:GAUGE:60:0:200 RRA:AVERAGE:0.5:1:527040"
 fi

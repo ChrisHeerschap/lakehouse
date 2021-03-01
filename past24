@@ -1,82 +1,71 @@
 #!/bin/ksh
 
-# Summarize the RRD values from the past 24 hours
+basedir="$HOME/collectd/lake/curl-weather/"
+ydate=$(date -d yesterday +%Y-%m-%d)
+yinfile="${basedir}/temperature-insideTemp-$ydate"
+youtfile="${basedir}/temperature-outsideTemp-$ydate"
 
-exec 2> /home/cmh/tmp/debug-p24
-set -x
-
-function temprange {
-	set -x
-	# Initialize limits
-	# Initialize maximum low and minimum high
-	typeset tmax=-1000
-	typeset tmin=1000
-	typeset tsum=0
-	typeset count=0
-	typeset freezecount=0
-	typeset tempfile=$1
-
-	# Degree days shit
-	# days per datapoint - 5 minutes out of 1440 in a day
-	#  ** have to use "5.0" to trigger FP math
-	#typeset daysper=$((5.0/1440))
-	# Using the standard 65 degree reference
-	#typeset ddref=65
-	#typeset degreedays=0
-
-	# Make sure the passed arg is a valid file
-	if [[ ! -f $tempfile || ! -r $tempfile ]]
-	then
-		print -u2 "ERROR: Can't read RRD file: $tempfile"
-		return 1
-	fi
-
-	# Get the maximum and minimum values from the outside temp
-	# Sample: 1448889600: 2.3199333333e+01
-	rrdtool fetch $tempfile AVERAGE | tail -n +3 | while read time temp
-	do
-		# Skip invalid values
-		[[ $temp == nan ]] && continue
-		# Check for max/min limits
-		if (( temp > tmax ))
-		then
-			tmax=$temp
-		elif (( temp < tmin ))
-		then
-			tmin=$temp
-		fi
-		# Calculate degree days
-		#(( temp < ddref )) && degreedays=$((degreedays+(ddref-temp)*daysper))
-
-		# Incrementing for calculating averages
-		(( tsum += temp ))
-		(( count++ ))
-		(( temp < 32 )) && (( freezecount++ ))
-	done
-
-	tavg=$((tsum/count))
-
-	# Output the information
-	printf "Temperature range: %.1f-%.1f°F, %.1f average" "$tmin" "$tmax" "$tavg"
-	if [[ $2 == "dd" ]]
-	then
-		printf " (%.1f degree days)\n" "$((65-tavg))"
-	else
-		echo
-	fi
-
-	# If it's gotten below freezing, show how often
-	if (( $tmin < 32 ))
-	then
-		printf "%.1f hours below freezing\n" "$((freezecount/12.0))"
-	fi
-
+minmax() {
+  typeset tmax=-1000
+  typeset tmin=1000
+  typeset sum=0
+  typeset count=0
+  typeset freezecount=0
+  cat "$1" | while IFS=, read -r -- ts temp
+  do
+    # Skip the header line
+    [[ $ts == [a-z]* ]] && continue
+    # Increment the counter and the sum (for the average)
+    (( count++ ))
+    (( sum = sum + temp ))
+    # Increment the freeze count if below freezing
+    if (( temp < 32.1 ))
+    then
+      (( freezecount++ ))
+    fi
+    # Check against the maximum/minimums
+    if (( temp > tmax ))
+    then
+      tmax=$temp
+      maxtime=${ts%[0-9].*}0
+    fi
+    if (( temp < tmin ))
+    then
+      tmin=$temp
+      mintime=${ts%[0-9].*}0
+    fi
+  done
+  # Calculate average temp
+  avg=$((sum/count))
+  # NOTE: The lack of a newline is intentional, see the following lines
+  printf "Range: %4.1f-%4.1f Avg: %4.1f" "${tmin}" "${tmax}" "${avg}"
+  # Add degree days if it's outside temps
+  if [[ $2 == out ]]
+  then
+    ddref=${intemp#-65}
+    # Output effective degree days based on house average temperature (65 if not known)
+    if (( ddref > avg ))
+    then
+      printf " DD %4.1f (r:%4.1f)\n" "$(( ddref - avg ))" "$ddref"
+    else
+      # Break the line
+      echo
+    fi
+  else
+    # Set the inside average temp
+    intemp="${avg}"
+    # Just output a newline
+    echo
+  fi
+  # Output the freezing time
+  if (( freezecount ))
+  then
+    echo "         _$((freezecount*count/1440)) minutes below freezing_"
+  fi
 }
 
-print "Outside:"
-temprange $HOME/rrd/outTemp.rrd dd
-
-print "Inside:"
-temprange $HOME/rrd/myTemp.rrd
-
-#rrdtool graph lederp.txt DEF:v=$HOME/rrd/outTemp.rrd:outTemp:AVERAGE VDEF:vmin=v,MINIMUM VDEF:vmax=v,MAXIMUM VDEF:vavg=v,AVERAGE PRINT:vmin:"min=%lf" PRINT:vmax:max=%lf PRINT:vavg:avg=%lf
+echo "*Lake house past day status:*"
+echo -n " *Inside*: "
+minmax "$yinfile"
+echo -n "*Outside*: "
+minmax "$youtfile" out

@@ -69,7 +69,7 @@ then
     exit 1
 fi
 
-if ! out=$(curl -s -X POST --data-urlencode "payload={\"channel\": \"${channel}\", \"username\": \"${username}\", \"text\": \"${icon} ${*}\", \"icon_emoji\": \"${icon}\"}" ${url})
+if ! out=$(curl -s -X POST --data-urlencode "payload={\"channel\": \"${channel}\", \"username\": \"${username}\", \"text\": \"${*}\", \"icon_emoji\": \"${icon}\"}" ${url})
 then
     echo -e "Failed:\n$out"
     exit 1
